@@ -32,3 +32,8 @@ __bin
 *.swp
 *.*~
 *~
+
+# Local ROM images and Odin build output
+*.rom
+/vcc
+/frame.ppm
