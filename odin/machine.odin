@@ -51,6 +51,17 @@ Machine :: struct {
 	sam_vdg_mode:    u8,
 	sam_dis_offset:  u8,
 	cpu_fast_ram:    bool, // $FFD9: RAM high speed poke
+
+	// PIAs, keyboard and the analog side
+	pia0, pia1:      Pia,
+	kb:              Keyboard,
+	joystick_compare: bool, // joystick comparator output (PIA0 A bit 7); no joystick yet
+	asample:         u8, // 6 bit DAC (0..127)
+	ssample:         u8, // single bit sound
+	csample:         u8, // cassette out
+	cass_motor:      bool,
+	cart_inserted:   bool,
+	cart_autostart:  bool,
 }
 
 machine_init :: proc(m: ^Machine, ram_config := 1) {
@@ -61,7 +72,13 @@ machine_init :: proc(m: ^Machine, ram_config := 1) {
 		m.ram[i] = 0 if i & 1 != 0 else 0xFF
 	}
 	for i in 0 ..< len(m.rom) {m.rom[i] = 0xFF}
+	m.cart_autostart = true
 	m.cpu.bus = Bus{m, machine_bus_read, machine_bus_write}
+}
+
+machine_load_cart :: proc(m: ^Machine, data: []u8) {
+	m.cart = data
+	m.cart_inserted = len(data) > 0
 }
 
 machine_destroy :: proc(m: ^Machine) {
@@ -80,6 +97,8 @@ machine_reset :: proc(m: ^Machine) {
 	m.sam_vdg_mode = 0
 	m.sam_dis_offset = 0
 	m.cpu_fast_ram = false
+	pia_reset(m)
+	keyboard_release_all(&m.kb)
 	cpu_reset(&m.cpu)
 }
 
@@ -218,12 +237,6 @@ port_write :: proc(m: ^Machine, port: u8, val: u8) {
 		sam_write(m, port)
 	}
 }
-
-// PIA stand-ins until milestone 4.
-pia0_read :: proc(m: ^Machine, port: u8) -> u8 {return 0}
-pia0_write :: proc(m: ^Machine, port: u8, val: u8) {}
-pia1_read :: proc(m: ^Machine, port: u8) -> u8 {return 0}
-pia1_write :: proc(m: ^Machine, port: u8, val: u8) {}
 
 // ---------------------------------------------------------------- SAM
 
