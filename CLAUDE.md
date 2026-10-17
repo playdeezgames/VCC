@@ -10,7 +10,7 @@ VCC (Virtual Color Computer): a Windows-only C++17 emulator of the Tandy CoCo 3 
 
 - Original (Windows only, "Developer Command Prompt for VS 2022"): `Build.bat` (Release, x86), `BuildClean.bat`, `BuildAll.bat`. Output goes to `__bin\Win32\<config>`.
 - The only tests runnable on Linux are the portable SSC chip cores: `ssc/test/run_tests.sh` (plain g++ -std=c++17; builds each `smoke_*.cpp` against `ssc/*.cpp` and runs it).
-- Odin port (once present): `odin build odin -out:vcc`, `odin test odin` (tests live beside the code as `*_test.odin`; one test: `-define:ODIN_TEST_NAMES=vcc.<name>`), `./vcc --rom /path/to/coco3.rom`. `coco3.rom` and `disk11.rom` sit in the repo root but are gitignored (`*.rom`); never commit them. Uses Odin's `vendor:sdl2` (needs `libsdl2-dev`). Headless runs: `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy`.
+- Odin port (once present): `odin build odin -out:vcc`, `odin test odin` (tests live beside the code as `*_test.odin`; one test: `-define:ODIN_TEST_NAMES=vcc.<name>`), `./vcc --rom /path/to/coco3.rom`. `coco3.rom` and `disk11.rom` sit in the repo root but are gitignored (`*.rom`); never commit them. Uses Odin's `vendor:sdl2` (needs `libsdl2-dev`). Headless: `./vcc --rom coco3.rom --dump-frame N --text-dump` runs N frames without a window and prints registers plus the VDG text screen (the tests use the real ROM too and skip without it). Hotkeys: F9 soft reset, F10 quit. `--cart disk11.rom` loads the external ROM at $C000.
 
 ## Architecture of the original (what to read when porting)
 

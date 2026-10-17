@@ -1,8 +1,9 @@
 package vcc
 
-import "core:log"
 import "core:os"
+import "core:strings"
 import "core:testing"
+import SDL "vendor:sdl2"
 
 // Machine with a recognisable ROM: rom[i] = i & 0xFF, except the reset vector.
 test_machine :: proc(ram_config := 1) -> ^Machine {
@@ -208,29 +209,64 @@ cpu_runs_from_rom_through_bus :: proc(t: ^testing.T) {
 	testing.expect_value(t, m.ram[0x0100 + 56 * 0x2000], 0x5A)
 }
 
-// Smoke test with the real ROM (skipped when coco3.rom is absent): the ROM
-// must run its reset code without wandering off into unmapped space.
-@(test)
-real_rom_boot_smoke :: proc(t: ^testing.T) {
+// ---- Real ROM tests (skipped when coco3.rom is absent) ----
+
+// Text of the 32x16 VDG screen at the SAM/GIME display address.
+screen_text :: proc(m: ^Machine) -> string {
+	voff := (int(m.gime_regs[0x9D]) << 8 | int(m.gime_regs[0x9E])) & 0xE0FF
+	start := (voff * 8 + int(m.sam_dis_offset) * 512) & (len(m.ram) - 1)
+	buf := make([]u8, 32 * 17, context.temp_allocator)
+	for row in 0 ..< 16 {
+		for col in 0 ..< 32 {
+			ch := m.ram[start + row * 32 + col] & 0x3F
+			buf[row * 33 + col] = ch + 0x40 if ch < 0x20 else ch
+		}
+		buf[row * 33 + 32] = '\n'
+	}
+	return string(buf)
+}
+
+real_rom_machine :: proc() -> ^Machine {
 	data, err := os.read_entire_file("coco3.rom", context.allocator)
-	if err != nil {return}
+	if err != nil {return nil}
 	defer delete(data)
 	m := new(Machine)
 	machine_init(m)
-	defer test_machine_free(m)
 	machine_load_rom(m, data)
 	machine_reset(m)
-	testing.expect(t, m.cpu.pc >= 0x8000)
-	for _ in 0 ..< 200000 {
-		cpu_exec(&m.cpu, 1)
-	}
-	// still executing from ROM or low RAM, not in the I/O page
-	testing.expect(t, m.cpu.pc < 0xFF00)
-	// The ROM has cleared/initialised text screen memory by now: count spaces ($60 or $20)
-	spaces := 0
-	for i in 0 ..< 512 {
-		b := mem_read8(m, u16(0x0400 + i))
-		if b == 0x60 || b == 0x20 {spaces += 1}
-	}
-	log.infof("pc=%04X spaces=%d", m.cpu.pc, spaces)
+	return m
+}
+
+tap_key :: proc(m: ^Machine, sc: SDL.Scancode, shift := false) {
+	if shift {machine_key_event(m, .LSHIFT, true)}
+	machine_key_event(m, sc, true)
+	for _ in 0 ..< 4 {machine_run_frame(m)}
+	machine_key_event(m, sc, false)
+	if shift {machine_key_event(m, .LSHIFT, false)}
+	for _ in 0 ..< 4 {machine_run_frame(m)}
+}
+
+@(test)
+real_rom_boots_to_basic_prompt :: proc(t: ^testing.T) {
+	m := real_rom_machine()
+	if m == nil {return}
+	defer test_machine_free(m)
+	for _ in 0 ..< 200 {machine_run_frame(m)}
+	text := screen_text(m)
+	testing.expect(t, strings.contains(text, "EXTENDED COLOR BASIC"), "banner missing")
+	testing.expect(t, strings.contains(text, "\nOK"), "OK prompt missing")
+}
+
+@(test)
+real_rom_runs_typed_basic :: proc(t: ^testing.T) {
+	m := real_rom_machine()
+	if m == nil {return}
+	defer test_machine_free(m)
+	for _ in 0 ..< 200 {machine_run_frame(m)}
+	// PRINT 7 <ENTER>
+	for sc in ([?]SDL.Scancode{.P, .R, .I, .N, .T, .SPACE, .NUM7, .RETURN}) {tap_key(m, sc)}
+	for _ in 0 ..< 30 {machine_run_frame(m)}
+	text := screen_text(m)
+	testing.expect(t, strings.contains(text, "PRINT 7"), "echo of typed line")
+	testing.expect(t, strings.contains(text, "\n 7"), "PRINT output")
 }

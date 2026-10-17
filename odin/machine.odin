@@ -62,6 +62,8 @@ Machine :: struct {
 	cass_motor:      bool,
 	cart_inserted:   bool,
 	cart_autostart:  bool,
+
+	timing:          Timing,
 }
 
 machine_init :: proc(m: ^Machine, ram_config := 1) {
@@ -98,6 +100,7 @@ machine_reset :: proc(m: ^Machine) {
 	m.sam_dis_offset = 0
 	m.cpu_fast_ram = false
 	pia_reset(m)
+	timing_reset(m)
 	keyboard_release_all(&m.kb)
 	cpu_reset(&m.cpu)
 }
@@ -257,8 +260,8 @@ sam_write :: proc(m: ^Machine, port_in: u8) {
 	if port == 0xDE || port == 0xDF {
 		m.map_type = port & 1
 	}
-	if port == 0xD8 {m.cpu_fast_ram = false}
-	if port == 0xD9 {m.cpu_fast_ram = true}
+	if port == 0xD8 {m.cpu_fast_ram = false; setup_clock(m)}
+	if port == 0xD9 {m.cpu_fast_ram = true; setup_clock(m)}
 }
 
 // ---------------------------------------------------------------- GIME
@@ -354,6 +357,13 @@ gime_write :: proc(m: ^Machine, port: u8, data: u8) {
 	case 0x91: // INIT1
 		m.mmu_task = data & 1
 		mmu_update_state(m)
+		timer_set_clock_rate(m, data & 32) // TINS
+	case 0x94: // timer MSB: restart
+		timer_restart(m, u32(gime_timer_counter(m)))
+	case 0x95: // timer LSB: only updates the cached period
+		timer_set_master(m, u32(gime_timer_counter(m)))
+	case 0x96: // turbo
+		set_turbo(m, data)
 	case 0x92:
 		gime_clear_irq(m, u32(data))
 		if_zero_timer(m, changed, data)
