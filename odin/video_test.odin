@@ -317,3 +317,87 @@ f5_style_toggle_changes_decoding :: proc(t: ^testing.T) {
 	m.monitor_rgb = false
 	testing.expect_value(t, hue_of(video_palette(m)[1]), Hue.Yellow) // as composite it is yellow
 }
+
+// CoCo 2 256x192 two-color graphics (PMODE 4), with the given color set bit.
+setup_pmode4 :: proc(m: ^Machine, css: u8) {
+	mem_write8(m, 0xFF90, 0x80)
+	mem_write8(m, 0xFF23, 0)
+	mem_write8(m, 0xFF22, 0xF8)
+	mem_write8(m, 0xFF23, 0x04)
+	mem_write8(m, 0xFF22, 0xF0 | css << 3) // A/G=1, GM=111, CSS
+	mem_write8(m, 0xFFC0, 0) // SAM V2..V0 = 110
+	mem_write8(m, 0xFFC3, 0)
+	mem_write8(m, 0xFFC5, 0)
+	set_video_start(m, 0)
+}
+
+fill_row0 :: proc(m: ^Machine, b: u8) {
+	for i in 0 ..< 32 {m.ram[i] = b}
+}
+
+@(test)
+artifact_colors_appear_for_alternating_pixels :: proc(t: ^testing.T) {
+	m := video_machine()
+	defer video_machine_free(m)
+	m.monitor_rgb = false // composite
+	setup_pmode4(m, 1)
+	fill_row0(m, 0b10101010)
+	machine_run_frame(m)
+	c := px(m, 64 + 120, ROW0)
+	h := hue_of(c)
+	testing.expect(t, h == .Blue || h == .Red, "alternating pixels turn into a blue or orange artifact color")
+	// the flip key swaps the phase
+	m.artifact_flip = true
+	machine_run_frame(m)
+	c2 := px(m, 64 + 120, ROW0)
+	testing.expect(t, c2 != c, "flipping changes the color")
+	testing.expect(t, hue_of(c2) == .Blue || hue_of(c2) == .Red)
+	// the other phase of the same pattern gives the other color family
+	fill_row0(m, 0b01010101)
+	m.artifact_flip = false
+	machine_run_frame(m)
+	c3 := px(m, 64 + 120, ROW0)
+	testing.expect(t, c3 != c, "shifting the pattern by a pixel swaps the colors")
+}
+
+@(test)
+artifacts_solid_black_and_white :: proc(t: ^testing.T) {
+	m := video_machine()
+	defer video_machine_free(m)
+	m.monitor_rgb = false
+	setup_pmode4(m, 1)
+	fill_row0(m, 0xFF)
+	machine_run_frame(m)
+	testing.expect_value(t, px(m, 64 + 100, ROW0), WHITE)
+	fill_row0(m, 0x00)
+	machine_run_frame(m)
+	testing.expect_value(t, px(m, 64 + 100, ROW0), BLACK)
+}
+
+@(test)
+no_artifacts_on_rgb_monitor_or_color_set_0 :: proc(t: ^testing.T) {
+	m := video_machine()
+	defer video_machine_free(m)
+	// RGB monitor: plain two-color pixels, 2 wide each (white = palette 11)
+	m.monitor_rgb = true
+	setup_pmode4(m, 1)
+	fill_row0(m, 0b10101010)
+	machine_run_frame(m)
+	testing.expect_value(t, px(m, 64, ROW0), rgb_color(m.gime_regs[0xBB] & 63)) // first pixel set -> palette 11
+	testing.expect_value(t, px(m, 66, ROW0), rgb_color(m.gime_regs[0xBA] & 63)) // next pixel clear -> palette 10
+	// composite but color set 0 (green): no artifacts either
+	m.monitor_rgb = false
+	setup_pmode4(m, 0)
+	fill_row0(m, 0b10101010)
+	machine_run_frame(m)
+	testing.expect_value(t, hue_of(px(m, 64, ROW0)), Hue.Green)
+}
+
+@(test)
+artifact_table_is_complete :: proc(t: ^testing.T) {
+	for v in ARTIFACT_INDEX {testing.expect(t, v < 16)}
+	testing.expect_value(t, ARTIFACT_COLORS[0][0], u32(0xFF000000))
+	testing.expect_value(t, ARTIFACT_COLORS[0][15], u32(0xFFFFFFFF))
+	testing.expect_value(t, ARTIFACT_COLORS[1][15], u32(0xFFFFFFFF))
+	testing.expect_value(t, len(ARTIFACT_INDEX), 128)
+}

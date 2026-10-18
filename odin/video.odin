@@ -245,6 +245,90 @@ video_default_palette :: proc(m: ^Machine) {
 	for i in 0 ..< 16 {m.gime_regs[0xB0 + i] = pal[i]}
 }
 
+
+// ---------------------------------------------------------------- NTSC artifact colors
+//
+// A composite monitor turns the fine black/white pixel pattern of the CoCo 2
+// 256x192 two-color mode (PMODE 4, color set 1, i.e. white border) into
+// colors, because pixel pairs beat against the color burst. VCC models it with
+// a table indexed by the neighbouring pixel pairs: [previous pair][this pair]
+// [next pair][even/odd], giving one of 16 colors (ArtifactsNTSC in
+// tcc1014graphics.cpp). The second color set swaps the blue/red phase (the
+// real machine powers up in either phase; F3 flips it).
+
+ARTIFACT_COLORS := [2][16]u32 {
+	{
+		0xFF000000, 0xFF004000, 0xFF300030, 0xFFC0E0C0,
+		0xFFEEC8EE, 0xFF0020A0, 0xFFC03C1E, 0xFF618CFF,
+		0xFFFF8F48, 0xFFFF7800, 0xFF0080FF, 0xFF64F0FF,
+		0xFFFFF0C8, 0xFF00003C, 0xFF3C0000, 0xFFFFFFFF,
+	},
+	{
+		0xFF000000, 0xFF004000, 0xFF300030, 0xFFC0E0C0,
+		0xFFEEC8EE, 0xFFC03C1E, 0xFF0020A0, 0xFFFF8F48,
+		0xFF618CFF, 0xFF0080FF, 0xFFFF7800, 0xFFFFF0C8,
+		0xFF64F0FF, 0xFF3C0000, 0xFF00003C, 0xFFFFFFFF,
+	},
+}
+
+// Bit pattern [prev pair][pair][next pair][odd] to an index into ARTIFACT_COLORS.
+ARTIFACT_INDEX := [128]u8 {
+	0, 0, 0, 0, 0, 6, 0, 2, 5, 7, 5, 7, 1, 3, 1, 11,
+	8, 6, 8, 14, 8, 9, 8, 9, 4, 4, 4, 15, 12, 12, 12, 15,
+	5, 13, 5, 13, 13, 0, 13, 2, 10, 10, 10, 10, 10, 15, 10, 11,
+	3, 1, 3, 1, 15, 9, 15, 9, 11, 11, 11, 11, 15, 15, 15, 15,
+	14, 0, 14, 0, 14, 6, 14, 2, 0, 7, 0, 7, 1, 3, 1, 11,
+	9, 6, 9, 14, 9, 9, 9, 9, 15, 4, 15, 15, 12, 12, 12, 15,
+	2, 13, 2, 13, 2, 0, 2, 2, 10, 10, 10, 10, 10, 15, 10, 11,
+	12, 1, 12, 1, 12, 9, 12, 9, 15, 11, 15, 11, 15, 15, 15, 15,
+}
+
+// Does this frame use composite artifact colors? Only the CoCo 2 compatible
+// 256x192 two-color mode with color set 1 (white border), on a composite
+// monitor, and not when the GIME monochrome bit ($FF98 bit 4) forces RGB.
+video_artifacts_active :: proc(m: ^Machine, v: ^Video_Mode) -> bool {
+	return(
+		v.compat &&
+		v.graphics &&
+		v.bpp == 0 &&
+		v.pixels_per_line == 256 &&
+		v.border_color == 63 &&
+		!m.monitor_rgb &&
+		v.vmode & 0x10 == 0 \
+	)
+}
+
+// One scanline of artifact-colored PMODE 4 into lbuf, starting at x. Each pair
+// of pixels is looked up with its neighbours; the picture is delayed by one
+// pair, and the white border bleeds in at both ends (as in VCC).
+render_pmode4_ntsc :: proc(m: ^Machine, v: ^Video_Mode, lbuf: ^[FB_W]u32, start: int, mask: int) {
+	invert := int((v.vmode >> 5) & 1)
+	if m.artifact_flip {invert ~= 1}
+	pattern := u8(3 << 2 | 3) // white border on the left
+	x := v.horz_center
+
+	pair :: proc(lbuf: ^[FB_W]u32, x: ^int, pattern: u8, invert: int) {
+		idx := int(pattern) << 1
+		even := ARTIFACT_COLORS[invert][ARTIFACT_INDEX[idx]]
+		odd := ARTIFACT_COLORS[invert][ARTIFACT_INDEX[idx + 1]]
+		for c in ([2]u32{even, even}) {if x^ < FB_W {lbuf[x^] = c}; x^ += 1}
+		for c in ([2]u32{odd, odd}) {if x^ < FB_W {lbuf[x^] = c}; x^ += 1}
+	}
+
+	for i in 0 ..< v.bytes_per_row {
+		b := m.ram[(start + (v.hoffset + i) & 0xFF) & mask]
+		for _ in 0 ..< 4 {
+			pattern = (pattern << 2 + (b >> 6) & 3) & 0x3F
+			b <<= 2
+			pair(lbuf, &x, pattern, invert)
+		}
+	}
+	for _ in 0 ..< 2 { 	// right edge bleeds with the white border
+		pattern = (pattern << 2 + 3) & 0x3F
+		pair(lbuf, &x, pattern, invert)
+	}
+}
+
 video_begin_frame :: proc(m: ^Machine) {
 	m.blink_phase += 1
 	if m.blink_phase > BLINK_FRAMES {
@@ -359,6 +443,8 @@ draw_active_line :: proc(m: ^Machine, v: ^Video_Mode, y: int, vcenter: int, bord
 				put(&lbuf, &x, fg if (glyph >> (7 - b)) & 1 != 0 else bg, reps)
 			}
 		}
+	} else if video_artifacts_active(m, v) {
+		render_pmode4_ntsc(m, v, &lbuf, start, mask)
 	} else {
 		// Graphics: 1, 2 or 4 bits per pixel, bytes in memory order, MSB first
 		for i in 0 ..< v.bytes_per_row {

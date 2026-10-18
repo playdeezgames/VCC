@@ -11,7 +11,6 @@ Work that was deliberately left out so far. Roughly in priority order within eac
 - **Paste while BASIC is busy.** BASIC ignores keys typed during a disk command (SAVE/LOAD/DSKINI), so a pasted
   program with disk commands loses characters. Idea: after Enter, wait until the CPU polls the keyboard again
   (count PIA0 `$FF00` reads) instead of a fixed delay.
-- PMODE 4 artifact colours (VCC's `Pmode4MonType` / NTSC artifact tables); only plain green/black today.
 - Scanline-gap option and window scaling controls (VCC `ScanLines`).
 
 ## Disks (FD-502 is JVC/DSK only for now)

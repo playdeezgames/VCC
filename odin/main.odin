@@ -225,11 +225,14 @@ App :: struct {
 	audio:      ^Audio_Out, // nil when audio is off
 }
 
-// Host hotkeys:  F4 eject disk (Shift: drive 1)   F5 RGB/composite monitor   F6 pause   F7 paste clipboard   F8 keyboard joystick
+// Host hotkeys:  F3 flip artifact colors   F4 eject disk (Shift: drive 1)   F5 RGB/composite monitor   F6 pause   F7 paste clipboard   F8 keyboard joystick
 //                F9 soft reset   F10 quit   F11 fullscreen
 handle_key :: proc(m: ^Machine, app: ^App, sc: SDL.Scancode, down: bool) {
 	if down {
 		#partial switch sc {
+		case .F3:
+			m.artifact_flip = !m.artifact_flip // swap PMODE 4 blue/orange phase
+			return
 		case .F4:
 			// eject drive 0 (Shift: drive 1)
 			fdc_eject(m, 1 if SDL.GetModState() & SDL.KMOD_SHIFT != {} else 0)
