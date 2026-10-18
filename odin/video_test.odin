@@ -5,6 +5,7 @@ import "core:testing"
 
 video_machine :: proc() -> ^Machine {
 	m := test_machine()
+	m.monitor_rgb = true // most tests use the simple RGB decode
 	m.fb = make([]u32, FB_W * FB_H)
 	// Park the CPU in a harmless loop (BRA *) so it cannot scribble on video RAM.
 	poke(m, 0x4000, {0x20, 0xFE})
@@ -230,4 +231,89 @@ real_rom_screen_pixels :: proc(t: ^testing.T) {
 os_read_rom :: proc() -> (data: []u8, missing: bool) {
 	d, err := os.read_entire_file("coco3.rom", context.allocator)
 	return d, err != nil
+}
+
+Hue :: enum {
+	Other,
+	Green,
+	Yellow,
+	Blue,
+	Red,
+}
+
+// Coarse hue classification of an ARGB pixel.
+hue_of :: proc(c: u32) -> Hue {
+	r, g, b := int(c >> 16 & 0xFF), int(c >> 8 & 0xFF), int(c & 0xFF)
+	switch {
+	case g > 120 && r > 120 && b < 100:
+		return .Yellow
+	case g > r + 60 && g > b + 60:
+		return .Green
+	case b > r + 60 && b > g + 60:
+		return .Blue
+	case r > g + 60 && r > b + 60:
+		return .Red
+	}
+	return .Other
+}
+
+@(test)
+composite_palette_power_up_colors :: proc(t: ^testing.T) {
+	// BASIC's power-up palette values read on a composite monitor
+	testing.expect_value(t, hue_of(composite_color(0x12)), Hue.Green)
+	testing.expect_value(t, hue_of(composite_color(0x24)), Hue.Yellow)
+	testing.expect_value(t, hue_of(composite_color(0x0B)), Hue.Blue)
+	testing.expect_value(t, hue_of(composite_color(0x07)), Hue.Red)
+	testing.expect_value(t, composite_color(0x00), BLACK)
+	testing.expect_value(t, composite_color(0x3F), WHITE)
+}
+
+@(test)
+pmode3_colors_green_yellow_blue_red :: proc(t: ^testing.T) {
+	m := video_machine()
+	defer video_machine_free(m)
+	m.monitor_rgb = false // composite, the default
+	mem_write8(m, 0xFF90, 0x80)
+	// PIA1 B: A/G=1, GM = 110 (CG6, 128x192 4 colors = PMODE 3), CSS = 0
+	mem_write8(m, 0xFF23, 0)
+	mem_write8(m, 0xFF22, 0xF8)
+	mem_write8(m, 0xFF23, 0x04)
+	mem_write8(m, 0xFF22, 0xE0)
+	mem_write8(m, 0xFFC0, 0)
+	mem_write8(m, 0xFFC3, 0)
+	mem_write8(m, 0xFFC5, 0)
+	set_video_start(m, 0)
+	m.ram[0] = 0b00_01_10_11 // pixels 0, 1, 2, 3 = BASIC colors 1, 2, 3, 4
+	machine_run_frame(m)
+	testing.expect_value(t, hue_of(px(m, 64, ROW0)), Hue.Green) // color 1
+	testing.expect_value(t, hue_of(px(m, 68, ROW0)), Hue.Yellow) // color 2
+	testing.expect_value(t, hue_of(px(m, 72, ROW0)), Hue.Blue) // color 3
+	testing.expect_value(t, hue_of(px(m, 76, ROW0)), Hue.Red) // color 4
+}
+
+@(test)
+rom_programs_composite_palette :: proc(t: ^testing.T) {
+	data, missing := os_read_rom()
+	if missing {return}
+	defer delete(data)
+	m := video_machine()
+	defer video_machine_free(m)
+	machine_load_rom(m, data)
+	machine_reset(m)
+	for i in 0 ..< 16 {m.gime_regs[0xB0 + i] = 0} // forget the emulator's power-up palette
+	for _ in 0 ..< 200 {machine_run_frame(m)}
+	// the ROM itself writes the composite-style set (yellow = $24, red = $07)
+	testing.expect_value(t, m.gime_regs[0xB1], 0x24)
+	testing.expect_value(t, m.gime_regs[0xB3], 0x07)
+}
+
+@(test)
+f5_style_toggle_changes_decoding :: proc(t: ^testing.T) {
+	m := video_machine()
+	defer video_machine_free(m)
+	mem_write8(m, 0xFFB1, 0x24)
+	m.monitor_rgb = true
+	testing.expect_value(t, hue_of(video_palette(m)[1]), Hue.Red) // $24 as RGB bits is red
+	m.monitor_rgb = false
+	testing.expect_value(t, hue_of(video_palette(m)[1]), Hue.Yellow) // as composite it is yellow
 }

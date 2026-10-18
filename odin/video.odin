@@ -198,8 +198,43 @@ rgb_color :: proc(c: u8) -> u32 {
 	return 0xFF000000 | r << 16 | g << 8 | b
 }
 
+// Composite monitor colors: the same 6 bit register value is read as IIPPPP
+// (2 bits intensity, 4 bits phase). Table from VCC's MakeCMPpalette.
+CMP_RED := [64]int {
+	0, 14, 12, 21, 51, 86, 108, 118, 113, 92, 61, 21, 1, 5, 12, 13,
+	50, 29, 49, 86, 119, 158, 179, 192, 186, 165, 133, 94, 23, 16, 23, 25,
+	116, 74, 102, 142, 179, 219, 243, 252, 251, 230, 198, 155, 81, 61, 52, 57,
+	253, 137, 161, 189, 215, 240, 253, 253, 251, 237, 214, 183, 134, 121, 116, 255,
+}
+CMP_GREEN := [64]int {
+	0, 78, 69, 53, 33, 4, 1, 1, 12, 24, 31, 35, 37, 51, 67, 77,
+	50, 149, 141, 123, 103, 77, 55, 39, 35, 43, 53, 63, 100, 119, 137, 148,
+	116, 212, 204, 186, 164, 137, 114, 97, 88, 89, 96, 109, 156, 179, 199, 211,
+	253, 230, 221, 207, 192, 174, 158, 148, 143, 144, 150, 162, 196, 212, 225, 255,
+}
+CMP_BLUE := [64]int {
+	0, 20, 18, 14, 10, 10, 12, 19, 76, 135, 178, 196, 148, 97, 29, 20,
+	50, 38, 36, 32, 28, 25, 24, 78, 143, 207, 248, 249, 228, 174, 99, 46,
+	116, 58, 52, 48, 44, 41, 68, 132, 202, 250, 250, 250, 251, 243, 163, 99,
+	254, 104, 83, 77, 82, 105, 142, 188, 237, 251, 251, 251, 252, 240, 183, 255,
+}
+
+composite_color :: proc(c: u8) -> u32 {
+	i := int(c & 63)
+	gamma := f32(1.4)
+	if i > 39 {gamma = 1.1}
+	if i > 55 {gamma = 1.0}
+	ch :: proc(v: int, gamma: f32) -> u32 {return u32(min(255, f32(v) * gamma))}
+	return 0xFF000000 | ch(CMP_RED[i], gamma) << 16 | ch(CMP_GREEN[i], gamma) << 8 | ch(CMP_BLUE[i], gamma)
+}
+
+// Decode a palette/border register value for the selected monitor.
+video_color :: proc(m: ^Machine, c: u8) -> u32 {
+	return rgb_color(c) if m.monitor_rgb else composite_color(c)
+}
+
 video_palette :: proc(m: ^Machine) -> (pal: [16]u32) {
-	for i in 0 ..< 16 {pal[i] = rgb_color(m.gime_regs[0xB0 + i] & 63)}
+	for i in 0 ..< 16 {pal[i] = video_color(m, m.gime_regs[0xB0 + i])}
 	return
 }
 
@@ -236,7 +271,7 @@ video_draw_line :: proc(m: ^Machine, area: Video_Area, line: int) {
 	lines := LINES_PER_FRAME_TABLE[i]
 	vcenter := VCENTER_TABLE[i]
 	v := &m.video_mode
-	border := rgb_color(v.border_color)
+	border := video_color(m, v.border_color)
 
 	switch area {
 	case .Top_Border:

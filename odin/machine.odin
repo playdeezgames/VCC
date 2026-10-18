@@ -73,6 +73,7 @@ Machine :: struct {
 	video_start:     int, // latched start of video RAM
 	blink_state:     bool,
 	blink_phase:     int,
+	monitor_rgb:     bool, // false = composite monitor (BASIC's power-up palette), true = RGB
 
 	audio_samples:   [dynamic][2]i16, // samples produced since the last submit
 }

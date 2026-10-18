@@ -157,11 +157,14 @@ App :: struct {
 	window:     ^SDL.Window,
 }
 
-// Host hotkeys:  F6 pause   F7 paste clipboard   F8 keyboard joystick
+// Host hotkeys:  F5 RGB/composite monitor   F6 pause   F7 paste clipboard   F8 keyboard joystick
 //                F9 soft reset   F10 quit   F11 fullscreen
 handle_key :: proc(m: ^Machine, app: ^App, sc: SDL.Scancode, down: bool) {
 	if down {
 		#partial switch sc {
+		case .F5:
+			m.monitor_rgb = !m.monitor_rgb // composite <-> RGB monitor colors
+			return
 		case .F6:
 			app.paused = !app.paused
 			return
