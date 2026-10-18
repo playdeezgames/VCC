@@ -57,6 +57,7 @@ main :: proc() {
 
 	framebuffer := make([]u32, SCREEN_W * SCREEN_H)
 	defer delete(framebuffer)
+	m.fb = framebuffer
 
 	// Headless: run N frames, dump, exit (no window).
 	if dump_frame >= 0 {

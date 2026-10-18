@@ -64,6 +64,13 @@ Machine :: struct {
 	cart_autostart:  bool,
 
 	timing:          Timing,
+
+	// video
+	fb:              []u32, // FB_W x FB_H ARGB framebuffer (nil = don't render)
+	video_mode:      Video_Mode, // decoded once per frame
+	video_start:     int, // latched start of video RAM
+	blink_state:     bool,
+	blink_phase:     int,
 }
 
 machine_init :: proc(m: ^Machine, ram_config := 1) {
@@ -101,6 +108,7 @@ machine_reset :: proc(m: ^Machine) {
 	m.cpu_fast_ram = false
 	pia_reset(m)
 	timing_reset(m)
+	video_default_palette(m)
 	keyboard_release_all(&m.kb)
 	cpu_reset(&m.cpu)
 }
