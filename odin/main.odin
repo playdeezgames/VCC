@@ -14,6 +14,7 @@ main :: proc() {
 	cart_path := ""
 	dump_frame := -1
 	text_dump := false
+	mute := false
 	args := os.args[1:]
 	for i := 0; i < len(args); i += 1 {
 		switch args[i] {
@@ -28,10 +29,12 @@ main :: proc() {
 			if i < len(args) {dump_frame = parse_int(args[i])}
 		case "--text-dump":
 			text_dump = true
+		case "--mute":
+			mute = true
 		}
 	}
 	if rom_path == "" {
-		fmt.eprintln("usage: vcc --rom <coco3.rom> [--cart <disk11.rom>] [--dump-frame N [--text-dump]]")
+		fmt.eprintln("usage: vcc --rom <coco3.rom> [--cart <disk11.rom>] [--mute] [--dump-frame N [--text-dump]]")
 		os.exit(2)
 	}
 	rom, rerr := os.read_entire_file(rom_path, context.allocator)
@@ -80,6 +83,14 @@ main :: proc() {
 	tex := SDL.CreateTexture(renderer, .ARGB8888, .STREAMING, SCREEN_W, SCREEN_H)
 	defer SDL.DestroyWindow(window)
 
+	audio: Audio_Out
+	audio_ok := false
+	if !mute {
+		audio, audio_ok = audio_open()
+		if audio_ok {machine_enable_audio(m)}
+	}
+	defer if audio_ok {audio_close(&audio)}
+
 	frame_time := time.Second / 60
 	next := time.tick_now()
 	running := true
@@ -97,13 +108,19 @@ main :: proc() {
 		}
 
 		machine_run_frame(m)
+		if audio_ok {audio_submit(&audio, m)}
 
 		SDL.UpdateTexture(tex, nil, raw_data(framebuffer), SCREEN_W * 4)
 		SDL.RenderClear(renderer)
 		SDL.RenderCopy(renderer, tex, nil, nil)
 		SDL.RenderPresent(renderer)
 
-		// Hold 60 fps
+		// Hold 60 fps: the audio device paces us when present, else the clock.
+		if audio_ok {
+			for audio_ahead(&audio) && running {SDL.Delay(1)}
+			next = time.tick_now()
+			continue
+		}
 		next = time.tick_add(next, frame_time)
 		if rest := time.tick_diff(time.tick_now(), next); rest > 0 {
 			time.sleep(rest)

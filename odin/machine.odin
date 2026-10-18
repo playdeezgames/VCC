@@ -71,6 +71,8 @@ Machine :: struct {
 	video_start:     int, // latched start of video RAM
 	blink_state:     bool,
 	blink_phase:     int,
+
+	audio_samples:   [dynamic][2]i16, // samples produced since the last submit
 }
 
 machine_init :: proc(m: ^Machine, ram_config := 1) {
@@ -93,6 +95,7 @@ machine_load_cart :: proc(m: ^Machine, data: []u8) {
 machine_destroy :: proc(m: ^Machine) {
 	delete(m.ram)
 	m.ram = nil
+	delete(m.audio_samples)
 }
 
 machine_load_rom :: proc(m: ^Machine, data: []u8) {
