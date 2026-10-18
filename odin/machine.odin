@@ -55,7 +55,9 @@ Machine :: struct {
 	// PIAs, keyboard and the analog side
 	pia0, pia1:      Pia,
 	kb:              Keyboard,
-	joystick_compare: bool, // joystick comparator output (PIA0 A bit 7); no joystick yet
+	joy_axis:        [Axis]u16, // 0..STICK_MAX; 0 = not connected
+	joy_buttons:     u8,
+	paste:           Paste,
 	asample:         u8, // 6 bit DAC (0..127)
 	ssample:         u8, // single bit sound
 	csample:         u8, // cassette out
@@ -96,6 +98,7 @@ machine_destroy :: proc(m: ^Machine) {
 	delete(m.ram)
 	m.ram = nil
 	delete(m.audio_samples)
+	delete(m.paste.queue)
 }
 
 machine_load_rom :: proc(m: ^Machine, data: []u8) {

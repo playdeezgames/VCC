@@ -33,6 +33,7 @@ coco_layout := [?]Key_Entry {
 	{.NUM4, 16, 4}, {.NUM5, 16, 5}, {.NUM6, 16, 6}, {.NUM7, 16, 7},
 	{.NUM8, 32, 0}, {.NUM9, 32, 1},
 	{.SPACE, 8, 7},
+	{.GRAVE, 1, 0}, // @ (not on a PC key in this layout)
 	{.COMMA, 32, 4}, {.PERIOD, 32, 6}, {.SLASH, 32, 7},
 	{.MINUS, 32, 2}, // : *
 	{.SEMICOLON, 32, 3}, // ; +

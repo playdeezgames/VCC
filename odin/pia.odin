@@ -45,9 +45,7 @@ pia0_read :: proc(m: ^Machine, port: u8) -> u8 {
 		if dda {
 			p.reg[1] &= 63
 			cpu_deassert_interrupt(&m.cpu, .PIA0_HSYNC, .IRQ)
-			scan := keyboard_get_scan(&m.kb, p.reg[2] | ~p.dd[2])
-			if m.joystick_compare {scan |= 0x80}
-			return scan
+			return joystick_scan_bits(m, keyboard_get_scan(&m.kb, p.reg[2] | ~p.dd[2]))
 		}
 		return p.dd[0]
 	case 2:

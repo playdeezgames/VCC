@@ -93,22 +93,41 @@ main :: proc() {
 
 	frame_time := time.Second / 60
 	next := time.tick_now()
-	running := true
-	for running {
+	app := App{running = true, window = window}
+	for app.running {
 		e: SDL.Event
 		for SDL.PollEvent(&e) {
 			#partial switch e.type {
 			case .QUIT:
-				running = false
+				app.running = false
 			case .KEYDOWN:
-				if e.key.repeat == 0 {handle_key(m, &running, e.key.keysym.scancode, true)}
+				if e.key.repeat == 0 {handle_key(m, &app, e.key.keysym.scancode, true)}
 			case .KEYUP:
-				handle_key(m, &running, e.key.keysym.scancode, false)
+				handle_key(m, &app, e.key.keysym.scancode, false)
+			case .MOUSEMOTION:
+				w, h: i32
+				SDL.GetWindowSize(window, &w, &h)
+				if w > 0 && h > 0 {
+					machine_set_axis(m, .Right_X, int(e.motion.x) * STICK_MAX / int(w))
+					machine_set_axis(m, .Right_Y, int(e.motion.y) * STICK_MAX / int(h))
+				}
+			case .MOUSEBUTTONDOWN, .MOUSEBUTTONUP:
+				down := e.type == .MOUSEBUTTONDOWN
+				switch e.button.button {
+				case SDL.BUTTON_LEFT:
+					machine_set_button(m, BUTTON_RIGHT_1, down)
+				case SDL.BUTTON_RIGHT:
+					machine_set_button(m, BUTTON_RIGHT_2, down)
+				}
 			}
 		}
+		if app.key_joy {keyboard_joystick(m, &app)}
 
-		machine_run_frame(m)
-		if audio_ok {audio_submit(&audio, m)}
+		if !app.paused {
+			paste_step(m)
+			machine_run_frame(m)
+			if audio_ok {audio_submit(&audio, m)}
+		}
 
 		SDL.UpdateTexture(tex, nil, raw_data(framebuffer), SCREEN_W * 4)
 		SDL.RenderClear(renderer)
@@ -116,8 +135,8 @@ main :: proc() {
 		SDL.RenderPresent(renderer)
 
 		// Hold 60 fps: the audio device paces us when present, else the clock.
-		if audio_ok {
-			for audio_ahead(&audio) && running {SDL.Delay(1)}
+		if audio_ok && !app.paused {
+			for audio_ahead(&audio) && app.running {SDL.Delay(1)}
 			next = time.tick_now()
 			continue
 		}
@@ -130,11 +149,83 @@ main :: proc() {
 	}
 }
 
-handle_key :: proc(m: ^Machine, running: ^bool, sc: SDL.Scancode, down: bool) {
-	// Host hotkeys
-	if down && sc == .F10 {running^ = false; return}
-	if down && sc == .F9 {machine_reset(m); return} // soft reset
+App :: struct {
+	running:    bool,
+	paused:     bool,
+	fullscreen: bool,
+	key_joy:    bool, // arrow keys / Ctrl / Alt drive the right joystick
+	window:     ^SDL.Window,
+}
+
+// Host hotkeys:  F6 pause   F7 paste clipboard   F8 keyboard joystick
+//                F9 soft reset   F10 quit   F11 fullscreen
+handle_key :: proc(m: ^Machine, app: ^App, sc: SDL.Scancode, down: bool) {
+	if down {
+		#partial switch sc {
+		case .F6:
+			app.paused = !app.paused
+			return
+		case .F7:
+			if text := SDL.GetClipboardText(); text != nil {
+				paste_text(m, string(text))
+				SDL.free(rawptr(text))
+			}
+			return
+		case .F8:
+			app.key_joy = !app.key_joy
+			if !app.key_joy {keyboard_joystick_release(m)}
+			return
+		case .F9:
+			machine_reset(m)
+			return
+		case .F10:
+			app.running = false
+			return
+		case .F11:
+			app.fullscreen = !app.fullscreen
+			SDL.SetWindowFullscreen(app.window, SDL.WINDOW_FULLSCREEN_DESKTOP if app.fullscreen else {})
+			return
+		case .ESCAPE:
+			paste_cancel(m) // Break also aborts a paste in progress
+		}
+	}
+	if app.key_joy && is_joystick_key(sc) {
+		keyboard_joystick_key(m, sc, down)
+		return
+	}
 	machine_key_event(m, sc, down)
+}
+
+// Keyboard joystick: arrows move the right stick, Ctrl/Alt are its buttons.
+joy_keys_down: [SDL.NUM_SCANCODES]bool
+
+is_joystick_key :: proc(sc: SDL.Scancode) -> bool {
+	#partial switch sc {
+	case .UP, .DOWN, .LEFT, .RIGHT, .LCTRL, .LALT:
+		return true
+	}
+	return false
+}
+
+keyboard_joystick_key :: proc(m: ^Machine, sc: SDL.Scancode, down: bool) {
+	joy_keys_down[int(sc)] = down
+	machine_set_button(m, BUTTON_RIGHT_1, joy_keys_down[int(SDL.Scancode.LCTRL)])
+	machine_set_button(m, BUTTON_RIGHT_2, joy_keys_down[int(SDL.Scancode.LALT)])
+}
+
+keyboard_joystick :: proc(m: ^Machine, app: ^App) {
+	x, y := STICK_MAX / 2, STICK_MAX / 2
+	if joy_keys_down[int(SDL.Scancode.LEFT)] {x = 1}
+	if joy_keys_down[int(SDL.Scancode.RIGHT)] {x = STICK_MAX}
+	if joy_keys_down[int(SDL.Scancode.UP)] {y = 1}
+	if joy_keys_down[int(SDL.Scancode.DOWN)] {y = STICK_MAX}
+	machine_set_axis(m, .Right_X, x)
+	machine_set_axis(m, .Right_Y, y)
+}
+
+keyboard_joystick_release :: proc(m: ^Machine) {
+	joy_keys_down = {}
+	machine_set_button(m, BUTTON_RIGHT_1 | BUTTON_RIGHT_2, false)
 }
 
 // Debug aid until the renderer exists: print the 32x16 VDG text screen.
