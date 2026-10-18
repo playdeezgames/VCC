@@ -29,3 +29,6 @@ Everything hangs off one global `SystemState EmuState` (`defines.h`) and file-st
 
 - Single `Machine` struct passed by pointer in place of the C++ globals; one 32-bit pixel format only.
 - Milestone 1 scope is the core machine (6809, MMU, GIME/SAM, PIAs, keyboard, video, audio) booting to the BASIC `OK` prompt. 6309, disk, MPI and other plugins are later, separate plans.
+
+Typing programs in: `--paste "text\n"` and `--paste-file file.txt` feed BASIC through the ROM's keyboard routine (POLCAT, patched in via a CPU hook in `paste.odin`), which never drops characters (`--paste-keys` types on the emulated key matrix instead, `--paste-timing down,up,enter` tunes that). The first key after a disk command is eaten by its BREAK check, so send an extra newline after `SAVE`/`LOAD`. For headless runs add `--no-video` (much faster), `--dump-frame N` (an upper limit; it stops 600 frames after the typing ends), `--text-dump` and `--dump-mem file` (the 64K address space).
+

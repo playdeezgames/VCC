@@ -57,6 +57,13 @@ CPU6809 :: struct {
 	int_lines:    [Int_Source]u8, // per-source asserted interrupt bits
 	latch_d:      u8, // most recent latch input
 	latch_q:      u8, // previous latch input (what the CPU acts on)
+
+	// Optional hook: when execution reaches hook_pc the hook runs instead of
+	// the instruction; returning true means it handled it (including any
+	// cycles and PC change). Used to feed text into BASIC's keyboard routine.
+	hook:         proc(ctx: rawptr, c: ^CPU6809) -> bool,
+	hook_ctx:     rawptr,
+	hook_pc:      u16,
 }
 
 Mode :: enum {
@@ -603,6 +610,9 @@ cpu_exec :: proc(c: ^CPU6809, cycle_for: int) -> int {
 }
 
 step :: proc(c: ^CPU6809, cycle_for: int) {
+	if c.hook != nil && c.pc == c.hook_pc {
+		if c.hook(c.hook_ctx, c) {return}
+	}
 	op := fetch8(c)
 	switch {
 	case op < 0x10 || (op >= 0x60 && op < 0x80):

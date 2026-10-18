@@ -150,16 +150,47 @@ vdg_mode_from_pia1_b :: proc(t: ^testing.T) {
 }
 
 @(test)
-cart_firq_via_vsync :: proc(t: ^testing.T) {
+cart_line_sets_flag_at_reset_and_survives_pia_init :: proc(t: ^testing.T) {
 	m := test_machine()
 	defer test_machine_free(m)
 	cart := [?]u8{0x44, 0x4B}
 	machine_load_cart(m, cart[:])
-	mem_write8(m, 0xFF23, 0x05) // FIRQ enabled, data reg selected
-	irq_fs(m, .Falling) // vsync tick also asserts the cart line
-	testing.expect(t, m.cpu.int_lines[.PIA1_CART] & int_bit(.FIRQ) != 0)
-	mem_read8(m, 0xFF22) // clears
+	machine_reset(m)
+	testing.expect(t, m.pia1.reg[3] & 0x80 != 0, "CART flag is set at power-up")
+	// BASIC's PIA init writes the control registers: flag bits are read-only and must survive
+	mem_write8(m, 0xFF23, 0x00)
+	mem_write8(m, 0xFF23, 0x34)
+	testing.expect(t, m.pia1.reg[3] & 0x80 != 0, "control register writes do not clear the flag")
+	testing.expect_value(t, m.cpu.int_lines[.PIA1_CART], 0) // FIRQ not enabled yet
+	mem_write8(m, 0xFF23, 0x35) // enabling the interrupt raises FIRQ because the flag is pending
+	// (the flag is only reported; the line follows the enable on the next assert/clear)
+	mem_read8(m, 0xFF22) // reading the data register clears the flag
+	testing.expect_value(t, m.pia1.reg[3] & 0x80, 0)
 	testing.expect_value(t, m.cpu.int_lines[.PIA1_CART], 0)
+}
+
+@(test)
+cart_assert_raises_firq_when_enabled :: proc(t: ^testing.T) {
+	m := test_machine()
+	defer test_machine_free(m)
+	mem_write8(m, 0xFF23, 0x05) // FIRQ enabled, data register selected
+	pia_assert_cart(m)
+	testing.expect(t, m.cpu.int_lines[.PIA1_CART] & int_bit(.FIRQ) != 0)
+	mem_read8(m, 0xFF22)
+	testing.expect_value(t, m.cpu.int_lines[.PIA1_CART], 0)
+}
+
+@(test)
+control_writes_keep_interrupt_flags :: proc(t: ^testing.T) {
+	m := test_machine()
+	defer test_machine_free(m)
+	mem_write8(m, 0xFF01, 0x05)
+	irq_hs(m, .Falling)
+	testing.expect(t, m.pia0.reg[1] & 0x80 != 0)
+	mem_write8(m, 0xFF01, 0x04) // rewriting the control register leaves the pending flag alone
+	testing.expect(t, m.pia0.reg[1] & 0x80 != 0)
+	mem_read8(m, 0xFF00)
+	testing.expect_value(t, m.pia0.reg[1] & 0x80, 0)
 }
 
 @(test)

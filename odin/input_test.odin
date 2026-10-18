@@ -230,7 +230,7 @@ disk_basic_boots_with_disk_rom :: proc(t: ^testing.T) {
 	machine_reset(m)
 	for _ in 0 ..< 400 {machine_run_frame(m)}
 	text := screen_text(m)
-	testing.expect(t, contains(text, "DISK EXTENDED COLOR BASIC 1.1"), "disk banner")
+	testing.expect(t, contains(text, "DISK EXTENDED COLOR BASIC 2.1"), "disk banner")
 	testing.expect(t, contains(text, "\nOK"), "prompt")
 }
 
@@ -252,4 +252,23 @@ real_rom_natural_symbols :: proc(t: ^testing.T) {
 	testing.expect(t, contains(text, " 13"), "2+3*4-1")
 	testing.expect(t, contains(text, "-1"), "5=5 is true")
 	testing.expect(t, contains(text, "@:"), "string with @ and :")
+}
+
+@(test)
+real_rom_text_fed_through_polcat_hook :: proc(t: ^testing.T) {
+	m := real_rom_machine()
+	if m == nil {return}
+	defer test_machine_free(m)
+	for _ in 0 ..< 200 {machine_run_frame(m)}
+	// a line longer than the 32 column screen, typed without a single dropped character
+	long := "A$=\"0123456789012345678901234567890123456789012345678901234567890123456789\":PRINT LEN(A$)\n"
+	rom_paste_text(m, long)
+	for rom_paste_active(m) {machine_run_frame(m)}
+	for _ in 0 ..< 60 {machine_run_frame(m)}
+	testing.expect(t, contains(screen_text(m), "70"), "LEN(A$) = 70")
+	testing.expect(t, !rom_paste_active(m))
+	// a hook-less machine is unaffected
+	m2 := test_machine()
+	defer test_machine_free(m2)
+	testing.expect(t, m2.cpu.hook == nil)
 }

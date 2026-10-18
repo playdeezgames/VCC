@@ -7,9 +7,10 @@ import SDL "vendor:sdl2"
 // at a time, a few frames down and a few up, since BASIC drops keys that
 // arrive while it is busy (notably right after ENTER).
 
-PASTE_DOWN_FRAMES :: 3
-PASTE_UP_FRAMES :: 3
-PASTE_ENTER_FRAMES :: 25 // extra wait after a newline
+// Timing in frames; variables so scripted runs can type faster (--paste-fast).
+paste_down_frames := 3
+paste_up_frames := 3
+paste_enter_frames := 25 // extra wait after a newline
 
 Paste_Key :: struct {
 	sc:    SDL.Scancode,
@@ -154,8 +155,8 @@ paste_step :: proc(m: ^Machine) {
 		machine_key_event(m, p.held.sc, false)
 		if p.held.shift {machine_key_event(m, .LSHIFT, false)}
 		p.down = false
-		p.timer = PASTE_UP_FRAMES
-		if p.held.sc == .RETURN {p.timer += PASTE_ENTER_FRAMES}
+		p.timer = paste_up_frames
+		if p.held.sc == .RETURN {p.timer += paste_enter_frames}
 		return
 	}
 	if p.head >= len(p.queue) {
@@ -169,5 +170,47 @@ paste_step :: proc(m: ^Machine) {
 	machine_key_event(m, k.sc, true)
 	p.held = k
 	p.down = true
-	p.timer = PASTE_DOWN_FRAMES
+	p.timer = paste_down_frames
+}
+
+// ---------------------------------------------------------------- ROM level typing
+//
+// Instead of pressing keys on the emulated matrix, feed characters straight to
+// BASIC's keyboard poll routine (POLCAT, $A1CB in the CoCo 3 ROM): when the
+// ROM calls it and text is waiting, the routine is skipped and returns the next
+// character in A. Nothing is ever dropped (BASIC asks for a character only
+// when it is ready for one), so long listings go in reliably. Only works while
+// BASIC (or another program using POLCAT) is reading the keyboard.
+
+POLCAT_VECTOR :: 0xA000 // BASIC's table holds the address of the POLCAT routine
+
+rom_paste_text :: proc(m: ^Machine, text: string) {
+	clear(&m.rom_paste)
+	m.rom_paste_pos = 0
+	for c in transmute([]u8)text {
+		ch := c
+		if c == '\r' {continue}
+		if c == '\n' {ch = 13}
+		append(&m.rom_paste, ch)
+	}
+	// the POLCAT address comes from the ROM's jump table (word at $A000)
+	m.cpu.hook_pc = u16(m.rom[POLCAT_VECTOR - 0x8000]) << 8 | u16(m.rom[POLCAT_VECTOR - 0x8000 + 1])
+	m.cpu.hook = rom_paste_hook
+	m.cpu.hook_ctx = m
+}
+
+rom_paste_active :: proc(m: ^Machine) -> bool {
+	return m.rom_paste_pos < len(m.rom_paste)
+}
+
+rom_paste_hook :: proc(ctx: rawptr, c: ^CPU6809) -> bool {
+	m := cast(^Machine)ctx
+	if m.rom_paste_pos >= len(m.rom_paste) {return false}
+	ch := m.rom_paste[m.rom_paste_pos]
+	m.rom_paste_pos += 1
+	c.a = ch
+	c.cc -= {.Z, .N, .V}
+	c.pc = pull_s16(c) // RTS: the caller did JSR to POLCAT
+	c.cycles += 12
+	return true
 }

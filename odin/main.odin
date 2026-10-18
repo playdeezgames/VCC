@@ -18,6 +18,10 @@ main :: proc() {
 	mute := false
 	audio_stats := false
 	startup_text := ""
+	startup_file := ""
+	dump_mem := ""
+	no_video := false
+	paste_keys := false // type via the keyboard matrix instead of the ROM hook
 	disk_paths: [4]string
 	new_disk := ""
 	args := os.args[1:]
@@ -38,6 +42,32 @@ main :: proc() {
 			mute = true
 		case "--audio-stats":
 			audio_stats = true
+		case "--paste-file":
+			// type the contents of a text file at startup (e.g. a BASIC listing)
+			i += 1
+			if i < len(args) {startup_file = args[i]}
+		case "--paste-keys":
+			paste_keys = true
+		case "--no-video":
+			no_video = true // headless: skip rendering (much faster)
+		case "--dump-mem":
+			// headless: write the 64K CPU address space to a file at the end
+			i += 1
+			if i < len(args) {dump_mem = args[i]}
+		case "--paste-timing":
+			// --paste-timing down,up,enter  (frames); default 3,3,25
+			i += 1
+			if i < len(args) {
+				parts := strings.split(args[i], ",", context.temp_allocator)
+				if len(parts) == 3 {
+					paste_down_frames = parse_int(parts[0])
+					paste_up_frames = parse_int(parts[1])
+					paste_enter_frames = parse_int(parts[2])
+				}
+			}
+		case "--paste-fast":
+			// 2 frames per key instead of 6; fine for the real ROM, used for long listings
+			paste_down_frames, paste_up_frames, paste_enter_frames = 2, 2, 8
 		case "--paste":
 			// type text at startup; \n in the argument is an Enter key
 			i += 1
@@ -93,13 +123,40 @@ main :: proc() {
 
 	framebuffer := make([]u32, SCREEN_W * SCREEN_H)
 	defer delete(framebuffer)
-	m.fb = framebuffer
+	if !no_video {m.fb = framebuffer}
+
+	if startup_file != "" {
+		data, ferr := os.read_entire_file(startup_file, context.allocator)
+		if ferr != nil {
+			fmt.eprintfln("cannot read %q", startup_file)
+			os.exit(1)
+		}
+		startup_text = string(data)
+	}
 
 	// Headless: run N frames, dump, exit (no window).
 	if dump_frame >= 0 {
-		for _ in 0 ..< dump_frame {machine_run_frame(m)}
+		pasted_at := -1
+		for f in 0 ..< dump_frame {
+			if f == 150 && startup_text != "" {
+				if paste_keys {paste_text(m, startup_text)} else {rom_paste_text(m, startup_text)}
+				pasted_at = f
+			}
+			paste_step(m)
+			machine_run_frame(m)
+			// stop once the typing is done and BASIC has had time to finish the last line
+			if pasted_at >= 0 && !paste_active(m) && !rom_paste_active(m) {
+				if pasted_at == 150 {pasted_at = f} // first idle frame
+				if f - pasted_at > 600 {break}
+			}
+		}
 		fmt.printfln("pc=%04X cc=%02X a=%02X b=%02X x=%04X s=%04X", m.cpu.pc, get_cc(&m.cpu), m.cpu.a, m.cpu.b, m.cpu.x, m.cpu.s)
 		if text_dump {dump_text_screen(m)}
+		if dump_mem != "" {
+			mem := make([]u8, 65536, context.temp_allocator)
+			for a in 0 ..< 65536 {mem[a] = mem_read8(m, u16(a))}
+			_ = os.write_entire_file(dump_mem, mem)
+		}
 		write_ppm("frame.ppm", framebuffer)
 		return
 	}

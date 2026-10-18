@@ -58,6 +58,8 @@ Machine :: struct {
 	joy_axis:        [Axis]u16, // 0..STICK_MAX; 0 = not connected
 	joy_buttons:     u8,
 	paste:           Paste,
+	rom_paste:       [dynamic]u8, // text fed to BASIC's POLCAT (see paste.odin)
+	rom_paste_pos:   int,
 	asample:         u8, // 6 bit DAC (0..127)
 	ssample:         u8, // single bit sound
 	csample:         u8, // cassette out
@@ -106,6 +108,7 @@ machine_destroy :: proc(m: ^Machine) {
 	m.ram = nil
 	delete(m.audio_samples)
 	delete(m.paste.queue)
+	delete(m.rom_paste)
 }
 
 machine_load_rom :: proc(m: ^Machine, data: []u8) {
@@ -120,6 +123,9 @@ machine_reset :: proc(m: ^Machine) {
 	m.sam_dis_offset = 0
 	m.cpu_fast_ram = false
 	pia_reset(m)
+	// A ROM cartridge holds the CART line, which sets PIA1's CB1 flag at power-up: BASIC's
+	// cold start sees it and jumps to the cartridge (Disk BASIC) before it enables IRQs.
+	if m.cart_inserted && m.cart_autostart {pia_assert_cart(m)}
 	timing_reset(m)
 	fdc_reset(m)
 	video_default_palette(m)

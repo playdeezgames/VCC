@@ -40,3 +40,4 @@ __bin
 /mkdisk
 *.dsk
 /MC6809E*.pdf
+/odin.bin

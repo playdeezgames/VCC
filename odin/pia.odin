@@ -69,13 +69,13 @@ pia0_write :: proc(m: ^Machine, port: u8, data: u8) {
 	case 2:
 		if ddb {p.reg[2] = data} else {p.dd[2] = data}
 	case 1:
-		p.reg[1] = data & 0x3F
+		p.reg[1] = p.reg[1] & 0xC0 | data & 0x3F // interrupt flags (bits 7-6) are read-only
 		// Disabling the interrupt (or a mode that cannot fire) drops the line.
 		if data & 0x01 == 0 && (data & 0x28) != 0x08 {
 			cpu_deassert_interrupt(&m.cpu, .PIA0_HSYNC, .IRQ)
 		}
 	case 3:
-		p.reg[3] = data & 0x3F
+		p.reg[3] = p.reg[3] & 0xC0 | data & 0x3F
 		if data & 0x01 == 0 && (data & 0x28) != 0x08 {
 			cpu_deassert_interrupt(&m.cpu, .PIA0_VSYNC, .IRQ)
 		}
@@ -135,10 +135,10 @@ pia1_write :: proc(m: ^Machine, port_in: u8, data: u8) {
 			p.dd[2] = data
 		}
 	case 1:
-		p.reg[1] = data & 0x3F
+		p.reg[1] = p.reg[1] & 0xC0 | data & 0x3F
 		m.cass_motor = data & 8 != 0
 	case 3:
-		p.reg[3] = data & 0x3F
+		p.reg[3] = p.reg[3] & 0xC0 | data & 0x3F
 	}
 }
 
@@ -165,9 +165,6 @@ irq_hs :: proc(m: ^Machine, edge: Edge) {
 // inserted and auto-start is on.
 irq_fs :: proc(m: ^Machine, edge: Edge) {
 	p := &m.pia0
-	if m.cart_inserted && m.cart_autostart {
-		pia_assert_cart(m)
-	}
 	switch edge {
 	case .Falling:
 		if p.reg[3] & 2 != 0 {return}

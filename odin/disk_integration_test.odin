@@ -48,7 +48,7 @@ disk_basic_dir_of_blank_disk :: proc(t: ^testing.T) {
 	defer {disk_basic_free(m); os.remove(path)}
 	type_basic(m, "DIR\n", 600)
 	text := screen_text(m)
-	testing.expect(t, contains(text, "DISK EXTENDED COLOR BASIC 1.1"))
+	testing.expect(t, contains(text, "DISK EXTENDED COLOR BASIC 2.1"))
 	testing.expect(t, contains(text, "\nDIR "), "DIR was typed")
 	testing.expect(t, !contains(text, "ERROR"), "a blank disk lists as empty")
 }
