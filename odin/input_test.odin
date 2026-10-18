@@ -75,20 +75,93 @@ buttons_pull_row_bits_low :: proc(t: ^testing.T) {
 
 @(test)
 char_mapping :: proc(t: ^testing.T) {
-	k, ok := char_to_key('A')
-	testing.expect(t, ok && k.sc == .A && !k.shift)
-	k, ok = char_to_key('a')
-	testing.expect(t, ok && k.sc == .A && k.shift)
-	k, ok = char_to_key('"')
-	testing.expect(t, ok && k.sc == .NUM2 && k.shift) // CoCo: shift+2
-	k, ok = char_to_key(':')
-	testing.expect(t, ok && k.sc == .MINUS && !k.shift)
-	k, ok = char_to_key('+')
-	testing.expect(t, ok && k.sc == .SEMICOLON && k.shift)
-	k, ok = char_to_key('\n')
-	testing.expect(t, ok && k.sc == .RETURN)
-	_, ok = char_to_key('~')
+	check :: proc(t: ^testing.T, c: u8, sc: SDL.Scancode, shift: bool, loc := #caller_location) {
+		k, ok := char_to_key(c)
+		testing.expectf(t, ok && k.sc == sc && k.shift == shift, "char_to_key(%c)", c, loc = loc)
+	}
+	check(t, 'A', .A, false)
+	check(t, 'a', .A, true)
+	check(t, '"', .APOSTROPHE, true)
+	check(t, ':', .SEMICOLON, true)
+	check(t, '+', .EQUALS, true)
+	check(t, '=', .EQUALS, false)
+	check(t, '-', .MINUS, false)
+	check(t, '*', .NUM8, true)
+	check(t, '@', .NUM2, true)
+	check(t, '\n', .RETURN, false)
+	_, ok := char_to_key(0x7F)
 	testing.expect(t, !ok)
+}
+
+// Which matrix keys does a set of held PC keys produce? Returns a bitmap
+// indexed [col] of row masks.
+matrix_for :: proc(keys: ..SDL.Scancode) -> [8]u8 {
+	kb: Keyboard
+	for k in keys {kb.down[int(k)] = true}
+	keyboard_update_rollover(&kb)
+	return kb.rollover
+}
+
+has :: proc(r: [8]u8, row: u8, col: int) -> bool {return r[col] & row != 0}
+only :: proc(r: [8]u8, row: u8, col: int) -> bool {
+	for c in 0 ..< 8 {
+		want := row if c == col else 0
+		if r[c] != want {return false}
+	}
+	return true
+}
+
+@(test)
+natural_layout_symbols :: proc(t: ^testing.T) {
+	// '-' is -, '=' is =: CoCo "-" key alone, CoCo shift + "-" key
+	testing.expect(t, only(matrix_for(.MINUS), 32, 5), "- types -")
+	r := matrix_for(.EQUALS)
+	testing.expect(t, has(r, 32, 5) && has(r, 64, 7), "= types = (shift-minus)")
+	// '*' is shift+8, '+' is shift+=
+	r = matrix_for(.LSHIFT, .NUM8)
+	testing.expect(t, has(r, 32, 2) && has(r, 64, 7), "*")
+	r = matrix_for(.RSHIFT, .EQUALS)
+	testing.expect(t, has(r, 32, 3) && has(r, 64, 7), "+")
+	// '@' is shift+2 and needs no CoCo shift
+	testing.expect(t, only(matrix_for(.LSHIFT, .NUM2), 1, 0), "@")
+	// ':' is shift+; and needs no CoCo shift
+	testing.expect(t, only(matrix_for(.LSHIFT, .SEMICOLON), 32, 2), ":")
+	// '"' is shift+'
+	r = matrix_for(.LSHIFT, .APOSTROPHE)
+	testing.expect(t, has(r, 16, 2) && has(r, 64, 7), "\"")
+	// digits keep their meaning, shift+1 is !
+	testing.expect(t, only(matrix_for(.NUM5), 16, 5))
+	r = matrix_for(.LSHIFT, .NUM1)
+	testing.expect(t, has(r, 16, 1) && has(r, 64, 7), "!")
+	// letters: plain = CoCo letter, shifted adds CoCo shift
+	testing.expect(t, only(matrix_for(.Q), 4, 1))
+	r = matrix_for(.LSHIFT, .Q)
+	testing.expect(t, has(r, 4, 1) && has(r, 64, 7))
+	// a lone shift is the CoCo shift key
+	testing.expect(t, only(matrix_for(.LSHIFT), 64, 7))
+	testing.expect(t, only(matrix_for(.RSHIFT), 64, 7))
+}
+
+@(test)
+natural_layout_arrows_and_specials :: proc(t: ^testing.T) {
+	testing.expect(t, only(matrix_for(.UP), 8, 3), "up")
+	testing.expect(t, only(matrix_for(.DOWN), 8, 4), "down")
+	testing.expect(t, only(matrix_for(.LEFT), 8, 5), "left")
+	testing.expect(t, only(matrix_for(.RIGHT), 8, 6), "right")
+	testing.expect(t, only(matrix_for(.KP_8), 8, 3), "numpad up")
+	testing.expect(t, only(matrix_for(.KP_2), 8, 4), "numpad down")
+	testing.expect(t, only(matrix_for(.KP_4), 8, 5), "numpad left")
+	testing.expect(t, only(matrix_for(.KP_6), 8, 6), "numpad right")
+	testing.expect(t, only(matrix_for(.BACKSPACE), 8, 5), "backspace = left arrow")
+	testing.expect(t, only(matrix_for(.ESCAPE), 64, 2), "esc = break")
+	testing.expect(t, only(matrix_for(.HOME), 64, 1), "home = clear")
+	testing.expect(t, only(matrix_for(.RETURN), 64, 0), "enter")
+	// shift + arrow = CoCo shift + arrow
+	r := matrix_for(.LSHIFT, .UP)
+	testing.expect(t, has(r, 8, 3) && has(r, 64, 7))
+	// all four at once
+	r = matrix_for(.UP, .DOWN, .LEFT, .RIGHT)
+	testing.expect(t, has(r, 8, 3) && has(r, 8, 4) && has(r, 8, 5) && has(r, 8, 6))
 }
 
 @(test)
@@ -162,3 +235,21 @@ disk_basic_boots_with_disk_rom :: proc(t: ^testing.T) {
 }
 
 contains :: proc(s, sub: string) -> bool {return strings.contains(s, sub)}
+
+@(test)
+real_rom_natural_symbols :: proc(t: ^testing.T) {
+	m := real_rom_machine()
+	if m == nil {return}
+	defer test_machine_free(m)
+	for _ in 0 ..< 200 {machine_run_frame(m)}
+	// Exercises - = * + : " @ through the paste -> PC key -> CoCo matrix path.
+	paste_text(m, "PRINT 2+3*4-1\nPRINT 5=5\nPRINT \"@:\"\n")
+	for _ in 0 ..< 700 {
+		paste_step(m)
+		machine_run_frame(m)
+	}
+	text := screen_text(m)
+	testing.expect(t, contains(text, " 13"), "2+3*4-1")
+	testing.expect(t, contains(text, "-1"), "5=5 is true")
+	testing.expect(t, contains(text, "@:"), "string with @ and :")
+}

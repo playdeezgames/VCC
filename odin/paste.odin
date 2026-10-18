@@ -24,47 +24,77 @@ Paste :: struct {
 	held:    Paste_Key,
 }
 
-// Map one character to the keys that produce it on a CoCo.
+// Map one character to the PC keys (US layout) that type it; the keyboard
+// layout then turns those into the CoCo key presses. Letters are typed the
+// CoCo way: unshifted = upper case, shifted = lower case.
 char_to_key :: proc(c: u8) -> (key: Paste_Key, ok: bool) {
 	ok = true
 	switch c {
 	case 'A' ..= 'Z':
-		key.sc = SDL.Scancode(int(SDL.Scancode.A) + int(c - 'A')) // unshifted = upper case
+		key.sc = SDL.Scancode(int(SDL.Scancode.A) + int(c - 'A'))
 	case 'a' ..= 'z':
 		key.sc = SDL.Scancode(int(SDL.Scancode.A) + int(c - 'a'))
-		key.shift = true // shifted = lower case
+		key.shift = true
 	case '1' ..= '9':
 		key.sc = SDL.Scancode(int(SDL.Scancode.NUM1) + int(c - '1'))
 	case '0':
 		key.sc = .NUM0
-	case '!' ..= '\'':
-		// ! " # $ % & ' are shift+1..7 on the CoCo
-		key.sc = SDL.Scancode(int(SDL.Scancode.NUM1) + int(c - '!'))
-		key.shift = true
-	case '(':
+	case '!':
+		key.sc, key.shift = .NUM1, true
+	case '@':
+		key.sc, key.shift = .NUM2, true
+	case '#':
+		key.sc, key.shift = .NUM3, true
+	case '$':
+		key.sc, key.shift = .NUM4, true
+	case '%':
+		key.sc, key.shift = .NUM5, true
+	case '^':
+		key.sc, key.shift = .NUM6, true
+	case '&':
+		key.sc, key.shift = .NUM7, true
+	case '*':
 		key.sc, key.shift = .NUM8, true
-	case ')':
+	case '(':
 		key.sc, key.shift = .NUM9, true
+	case ')':
+		key.sc, key.shift = .NUM0, true
 	case ' ':
 		key.sc = .SPACE
 	case '\n':
 		key.sc = .RETURN
-	case ':':
+	case '-':
 		key.sc = .MINUS
-	case '*':
+	case '_':
 		key.sc, key.shift = .MINUS, true
+	case '=':
+		key.sc = .EQUALS
+	case '+':
+		key.sc, key.shift = .EQUALS, true
+	case '[':
+		key.sc = .LEFTBRACKET
+	case '{':
+		key.sc, key.shift = .LEFTBRACKET, true
+	case ']':
+		key.sc = .RIGHTBRACKET
+	case '}':
+		key.sc, key.shift = .RIGHTBRACKET, true
+	case '\\':
+		key.sc = .BACKSLASH
+	case '|':
+		key.sc, key.shift = .BACKSLASH, true
 	case ';':
 		key.sc = .SEMICOLON
-	case '+':
+	case ':':
 		key.sc, key.shift = .SEMICOLON, true
+	case '\'':
+		key.sc = .APOSTROPHE
+	case '"':
+		key.sc, key.shift = .APOSTROPHE, true
 	case ',':
 		key.sc = .COMMA
 	case '<':
 		key.sc, key.shift = .COMMA, true
-	case '-':
-		key.sc = .EQUALS
-	case '=':
-		key.sc, key.shift = .EQUALS, true
 	case '.':
 		key.sc = .PERIOD
 	case '>':
@@ -73,8 +103,10 @@ char_to_key :: proc(c: u8) -> (key: Paste_Key, ok: bool) {
 		key.sc = .SLASH
 	case '?':
 		key.sc, key.shift = .SLASH, true
-	case '@':
+	case '`':
 		key.sc = .GRAVE
+	case '~':
+		key.sc, key.shift = .GRAVE, true
 	case:
 		ok = false
 	}
