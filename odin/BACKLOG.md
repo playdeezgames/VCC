@@ -2,6 +2,13 @@
 
 Work that was deliberately left out so far. Roughly in priority order within each group.
 
+## Platforms
+- **WebAssembly build** alongside the native SDL client (Odin `js_wasm32`, canvas + Web Audio, keyboard/mouse
+  and file input from the browser for ROM and disk images). Needs the machine core kept free of OS calls
+  (file access and timing only in `main.odin`, `audio.odin`, `disk/`), a JS shim for video/audio/input, and
+  a way to supply ROMs and disk images without the filesystem (user-picked files, or our own ROM built in).
+  The custom ROM work (branch `custom-rom`) makes this practical, since `coco3.rom` cannot be shipped.
+
 ## Bugs / polish
 - **Audio popping** (reported 2026-10-18): the pop on every start came from a DC step (silence -> centred
   level) in `dac_sample`; fixed with a 10 Hz high-pass filter primed at the current level, plus a fade-out on
