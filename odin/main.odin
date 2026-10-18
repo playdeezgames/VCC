@@ -16,6 +16,8 @@ main :: proc() {
 	dump_frame := -1
 	text_dump := false
 	mute := false
+	audio_stats := false
+	startup_text := ""
 	disk_paths: [4]string
 	new_disk := ""
 	args := os.args[1:]
@@ -34,6 +36,12 @@ main :: proc() {
 			text_dump = true
 		case "--mute":
 			mute = true
+		case "--audio-stats":
+			audio_stats = true
+		case "--paste":
+			// type text at startup; \n in the argument is an Enter key
+			i += 1
+			if i < len(args) {startup_text, _ = strings.replace_all(args[i], "\\n", "\n")}
 		case "--disk0", "--disk1", "--disk2", "--disk3":
 			n := int(args[i][6] - '0')
 			i += 1
@@ -114,11 +122,16 @@ main :: proc() {
 		audio, audio_ok = audio_open()
 		if audio_ok {machine_enable_audio(m)}
 	}
-	defer if audio_ok {audio_close(&audio)}
+	defer if audio_ok {
+		if audio_stats {audio_print_stats(&audio)}
+		audio_close(&audio)
+	}
 
+	startup_wait := 150 // frames for BASIC to reach its prompt before typing
 	frame_time := time.Second / 60
 	next := time.tick_now()
 	app := App{running = true, window = window}
+	if audio_ok {app.audio = &audio}
 	last_title: string
 	defer delete(last_title)
 	for app.running {
@@ -158,6 +171,10 @@ main :: proc() {
 		}
 		if app.key_joy {keyboard_joystick(m, &app)}
 
+		if startup_text != "" {
+			startup_wait -= 1
+			if startup_wait == 0 {paste_text(m, startup_text)}
+		}
 		if !app.paused {
 			paste_step(m)
 			machine_run_frame(m)
@@ -205,6 +222,7 @@ App :: struct {
 	fullscreen: bool,
 	key_joy:    bool, // arrow keys / Ctrl / Alt drive the right joystick
 	window:     ^SDL.Window,
+	audio:      ^Audio_Out, // nil when audio is off
 }
 
 // Host hotkeys:  F4 eject disk (Shift: drive 1)   F5 RGB/composite monitor   F6 pause   F7 paste clipboard   F8 keyboard joystick
@@ -221,6 +239,7 @@ handle_key :: proc(m: ^Machine, app: ^App, sc: SDL.Scancode, down: bool) {
 			return
 		case .F6:
 			app.paused = !app.paused
+			if app.paused && app.audio != nil {audio_fade_out(app.audio, m)}
 			return
 		case .F7:
 			if text := SDL.GetClipboardText(); text != nil {

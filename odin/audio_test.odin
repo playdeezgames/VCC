@@ -40,19 +40,61 @@ samples_per_frame :: proc(t: ^testing.T) {
 }
 
 @(test)
-dac_level_reaches_output :: proc(t: ^testing.T) {
+dac_change_becomes_a_step :: proc(t: ^testing.T) {
 	m := test_machine()
 	defer test_machine_free(m)
 	park_cpu(m)
 	audio_setup_pia(m)
 	machine_enable_audio(m)
+	machine_run_frame(m) // DAC idle at 0: the filter starts here
+	clear(&m.audio_samples)
 	mem_write8(m, 0xFF20, 0xFC) // full scale (asample = 126)
 	machine_run_frame(m)
-	testing.expect_value(t, m.audio_samples[100], [2]i16{126 << 7 - 16384, 126 << 7 - 16384})
+	// the step passes through at its full height, then decays like a coupling capacitor
+	first := int(m.audio_samples[0].x)
+	testing.expect(t, first > 15000 && first <= 126 << 7, "step reaches the output")
+	testing.expect(t, int(m.audio_samples[700].x) < first, "offset decays")
 	clear(&m.audio_samples)
 	mem_write8(m, 0xFF20, 0x00)
 	machine_run_frame(m)
-	testing.expect_value(t, m.audio_samples[100], [2]i16{-16384, -16384})
+	testing.expect(t, m.audio_samples[0].x < -10000, "falling step is negative")
+}
+
+@(test)
+constant_level_is_silence_with_no_startup_pop :: proc(t: ^testing.T) {
+	m := test_machine()
+	defer test_machine_free(m)
+	park_cpu(m)
+	audio_setup_pia(m)
+	mem_write8(m, 0xFF20, 0xFC) // DAC already non-zero when audio starts
+	machine_enable_audio(m)
+	machine_run_frame(m)
+	for s in m.audio_samples {
+		if s.x != 0 {
+			testing.expectf(t, false, "expected silence from the first sample, got %d", s.x)
+			break
+		}
+	}
+	// a constant level decays to nothing; here it never changed at all
+	testing.expect_value(t, m.audio_samples[len(m.audio_samples) - 1], [2]i16{0, 0})
+}
+
+@(test)
+offset_after_a_step_dies_away :: proc(t: ^testing.T) {
+	m := test_machine()
+	defer test_machine_free(m)
+	park_cpu(m)
+	audio_setup_pia(m)
+	machine_enable_audio(m)
+	machine_run_frame(m)
+	clear(&m.audio_samples)
+	mem_write8(m, 0xFF20, 0x80)
+	for _ in 0 ..< 60 {machine_run_frame(m)} // one second
+	clear(&m.audio_samples)
+	machine_run_frame(m)
+	// a held level must not stay audible as DC
+	testing.expect(t, abs(int(m.audio_samples[100].x)) < 100, "settled")
+	testing.expect(t, m.audio_hp_y == m.audio_hp_y, "finite") // NaN guard
 }
 
 @(test)
@@ -62,9 +104,12 @@ single_bit_sound_adds_to_output :: proc(t: ^testing.T) {
 	park_cpu(m)
 	audio_setup_pia(m)
 	machine_enable_audio(m)
+	machine_run_frame(m)
+	clear(&m.audio_samples)
 	mem_write8(m, 0xFF22, 0x02) // sound bit on
 	machine_run_frame(m)
-	testing.expect_value(t, m.audio_samples[50], [2]i16{128 << 7 - 16384, 128 << 7 - 16384})
+	first := int(m.audio_samples[0].x)
+	testing.expect(t, first > 15000 && first <= 128 << 7, "single bit step")
 }
 
 @(test)
@@ -82,5 +127,5 @@ square_wave_from_cpu_program :: proc(t: ^testing.T) {
 		lo = min(lo, s.x)
 		hi = max(hi, s.x)
 	}
-	testing.expect(t, hi - lo >= 126 << 7 - 1, "both DAC extremes were sampled")
+	testing.expect(t, hi - lo > 15000, "both DAC extremes were sampled")
 }

@@ -77,6 +77,9 @@ Machine :: struct {
 	monitor_rgb:     bool, // false = composite monitor (BASIC's power-up palette), true = RGB
 
 	audio_samples:   [dynamic][2]i16, // samples produced since the last submit
+	audio_hp_x:      f32, // high-pass filter state (see dac_sample)
+	audio_hp_y:      f32,
+	audio_hp_primed: bool,
 }
 
 machine_init :: proc(m: ^Machine, ram_config := 1) {
