@@ -155,6 +155,7 @@ hsync :: proc(m: ^Machine, level: int) {
 	if level == 0 {
 		gime_assert_hsync(m)
 		irq_hs(m, .Falling)
+		fdc_ping(m)
 	} else {
 		irq_hs(m, .Rising)
 	}

@@ -5,6 +5,7 @@ import "core:os"
 import "core:strings"
 import "core:time"
 import SDL "vendor:sdl2"
+import "disk"
 
 SCREEN_W :: 640
 SCREEN_H :: 480
@@ -15,6 +16,8 @@ main :: proc() {
 	dump_frame := -1
 	text_dump := false
 	mute := false
+	disk_paths: [4]string
+	new_disk := ""
 	args := os.args[1:]
 	for i := 0; i < len(args); i += 1 {
 		switch args[i] {
@@ -31,10 +34,17 @@ main :: proc() {
 			text_dump = true
 		case "--mute":
 			mute = true
+		case "--disk0", "--disk1", "--disk2", "--disk3":
+			n := int(args[i][6] - '0')
+			i += 1
+			if i < len(args) {disk_paths[n] = args[i]}
+		case "--new-disk":
+			i += 1
+			if i < len(args) {new_disk = args[i]}
 		}
 	}
 	if rom_path == "" {
-		fmt.eprintln("usage: vcc --rom <coco3.rom> [--cart <disk11.rom>] [--mute] [--dump-frame N [--text-dump]]")
+		fmt.eprintln("usage: vcc --rom <coco3.rom> [--cart <disk11.rom>] [--disk0..--disk3 <image.dsk>] [--new-disk <file.dsk>] [--mute] [--dump-frame N [--text-dump]]")
 		os.exit(2)
 	}
 	rom, rerr := os.read_entire_file(rom_path, context.allocator)
@@ -55,8 +65,23 @@ main :: proc() {
 			os.exit(1)
 		}
 		machine_load_cart(m, cart)
+		m.fdc.enabled = true // a disk ROM implies the FD-502 controller
 	}
 	machine_reset(m)
+	if new_disk != "" {
+		if err := disk.create_blank(new_disk); err != .None && err != .Exists {
+			fmt.eprintfln("cannot create %q: %s", new_disk, disk.error_text(err))
+			os.exit(1)
+		}
+		disk_paths[0] = new_disk
+	}
+	for path, drive in disk_paths {
+		if path == "" {continue}
+		if err := fdc_mount(m, drive, path); err != .None {
+			fmt.eprintfln("cannot mount %q in drive %d: %s", path, drive, disk.error_text(err))
+			os.exit(1)
+		}
+	}
 
 	framebuffer := make([]u32, SCREEN_W * SCREEN_H)
 	defer delete(framebuffer)
@@ -94,6 +119,8 @@ main :: proc() {
 	frame_time := time.Second / 60
 	next := time.tick_now()
 	app := App{running = true, window = window}
+	last_title: string
+	defer delete(last_title)
 	for app.running {
 		e: SDL.Event
 		for SDL.PollEvent(&e) {
@@ -104,6 +131,14 @@ main :: proc() {
 				if e.key.repeat == 0 {handle_key(m, &app, e.key.keysym.scancode, true)}
 			case .KEYUP:
 				handle_key(m, &app, e.key.keysym.scancode, false)
+			case .DROPFILE:
+				// Drop a disk image on the window: drive 0, or drive 1 with Shift held.
+				drive := 1 if SDL.GetModState() & SDL.KMOD_SHIFT != {} else 0
+				path := string(e.drop.file)
+				if err := fdc_mount(m, drive, path); err != .None {
+					fmt.eprintfln("cannot mount %q: %s", path, disk.error_text(err))
+				}
+				SDL.free(rawptr(e.drop.file))
 			case .MOUSEMOTION:
 				w, h: i32
 				SDL.GetWindowSize(window, &w, &h)
@@ -129,6 +164,8 @@ main :: proc() {
 			if audio_ok {audio_submit(&audio, m)}
 		}
 
+		update_title(window, m, &last_title)
+
 		SDL.UpdateTexture(tex, nil, raw_data(framebuffer), SCREEN_W * 4)
 		SDL.RenderClear(renderer)
 		SDL.RenderCopy(renderer, tex, nil, nil)
@@ -149,6 +186,19 @@ main :: proc() {
 	}
 }
 
+// Window title: base name plus the floppy status while the drive motor runs.
+update_title :: proc(window: ^SDL.Window, m: ^Machine, last: ^string) {
+	base := "VCC (Odin)"
+	title := base
+	if st := fdc_status_text(m); st != "" {
+		title = fmt.tprintf("%s - %s", base, st)
+	}
+	if title == last^ {return}
+	delete(last^)
+	last^ = strings.clone(title)
+	SDL.SetWindowTitle(window, strings.clone_to_cstring(title, context.temp_allocator))
+}
+
 App :: struct {
 	running:    bool,
 	paused:     bool,
@@ -157,11 +207,15 @@ App :: struct {
 	window:     ^SDL.Window,
 }
 
-// Host hotkeys:  F5 RGB/composite monitor   F6 pause   F7 paste clipboard   F8 keyboard joystick
+// Host hotkeys:  F4 eject disk (Shift: drive 1)   F5 RGB/composite monitor   F6 pause   F7 paste clipboard   F8 keyboard joystick
 //                F9 soft reset   F10 quit   F11 fullscreen
 handle_key :: proc(m: ^Machine, app: ^App, sc: SDL.Scancode, down: bool) {
 	if down {
 		#partial switch sc {
+		case .F4:
+			// eject drive 0 (Shift: drive 1)
+			fdc_eject(m, 1 if SDL.GetModState() & SDL.KMOD_SHIFT != {} else 0)
+			return
 		case .F5:
 			m.monitor_rgb = !m.monitor_rgb // composite <-> RGB monitor colors
 			return

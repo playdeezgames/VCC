@@ -66,6 +66,7 @@ Machine :: struct {
 	cart_autostart:  bool,
 
 	timing:          Timing,
+	fdc:             Fdc,
 
 	// video
 	fb:              []u32, // FB_W x FB_H ARGB framebuffer (nil = don't render)
@@ -96,6 +97,7 @@ machine_load_cart :: proc(m: ^Machine, data: []u8) {
 }
 
 machine_destroy :: proc(m: ^Machine) {
+	fdc_shutdown(m)
 	delete(m.ram)
 	m.ram = nil
 	delete(m.audio_samples)
@@ -115,6 +117,7 @@ machine_reset :: proc(m: ^Machine) {
 	m.cpu_fast_ram = false
 	pia_reset(m)
 	timing_reset(m)
+	fdc_reset(m)
 	video_default_palette(m)
 	keyboard_release_all(&m.kb)
 	cpu_reset(&m.cpu)
@@ -233,6 +236,8 @@ port_read :: proc(m: ^Machine, port: u8) -> u8 {
 		return pia0_read(m, port)
 	case 0x20 ..= 0x23:
 		return pia1_read(m, port)
+	case 0x40, 0x48 ..= 0x4B:
+		if m.fdc.enabled {return fdc_read(m, port)}
 	case 0x90 ..= 0xBF:
 		return gime_read(m, port)
 	case 0xC0 ..= 0xDF:
@@ -249,6 +254,8 @@ port_write :: proc(m: ^Machine, port: u8, val: u8) {
 		pia0_write(m, port, val)
 	case 0x20 ..= 0x23:
 		pia1_write(m, port, val)
+	case 0x40, 0x48 ..= 0x4B:
+		if m.fdc.enabled {fdc_write(m, port, val)}
 	case 0x90 ..= 0xBF:
 		gime_write(m, port, val)
 	case 0xC0 ..= 0xDF:

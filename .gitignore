@@ -37,3 +37,5 @@ __bin
 *.rom
 /vcc
 /frame.ppm
+/mkdisk
+*.dsk
