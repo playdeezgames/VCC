@@ -3,10 +3,11 @@
 Work that was deliberately left out so far. Roughly in priority order within each group.
 
 ## Bugs / polish
-- **Audio popping.** Audible pops in the sound output (reported 2026-10-18). Suspects: the queue-based
-  pacing in `audio.odin` (frames dropped or SDL under-runs when the queue runs dry), the DC step when the
-  first non-zero DAC value arrives (samples are centred, VCC's are not), and no filtering of the 44.1 kHz
-  square waves. Look at queue depth over time first.
+- **Audio popping** (reported 2026-10-18): the pop on every start came from a DC step (silence -> centred
+  level) in `dac_sample`; fixed with a 10 Hz high-pass filter primed at the current level, plus a fade-out on
+  pause. Queue under-runs were measured (`--audio-stats`: none) and the output captured with SDL's disk audio
+  driver (`SDL_AUDIODRIVER=disk`). If pops are still heard: look at note boundaries in BASIC `SOUND`/`PLAY`
+  (each ends with a DAC step) and at the 44.1 kHz sample-and-hold of fast DAC changes (no anti-aliasing).
 - **Paste while BASIC is busy.** BASIC ignores keys typed during a disk command (SAVE/LOAD/DSKINI), so a pasted
   program with disk commands loses characters. Idea: after Enter, wait until the CPU polls the keyboard again
   (count PIA0 `$FF00` reads) instead of a fixed delay.
@@ -26,7 +27,20 @@ Work that was deliberately left out so far. Roughly in priority order within eac
 - Virtual hard disk interface (`HardDisk/`, VHD files) and SuperIDE.
 
 ## CPU / machine
-- HD6309 CPU (`hd6309.cpp`): native mode, extra registers, the 6309-only instructions.
+- **HD6309 CPU** (reference: `hd6309.cpp`, 7.6k lines; docs: `docs/The_6309_Book.pdf`, `docs/6x09_Instruction_Sets.pdf`,
+  `docs/VCC-Notes.md`). Needed for NitrOS-9 and 6309-aware software. Scope when picked up:
+  - New core `cpu6309.odin` behind the same `Bus`/`cpu_exec` interface as `cpu6809.odin`, selectable from the
+    machine (VCC switches `CPUExec` at runtime; the 6309 must start in emulation mode and behave like a 6809).
+  - Extra registers E, F (with W = E:F and Q = D:W) and V; mode register MD (native mode, FIRQ stacking, divide-
+    by-zero and illegal-opcode traps); TFR/EXG with the new register codes.
+  - Native mode timing (fewer cycles than the 6809) and the 6309 interrupt stacking differences.
+  - Opcodes: LDQ/STQ, ADDE/ADDF/ADDW, SUBE/SUBF/SUBW, CMPE/CMPF/CMPW, bit ops (BAND/BIAND/BOR/BIOR/BEOR/BIEOR,
+    LDBT/STBT), AIM/EIM/OIM/TIM, MULD, DIVD/DIVQ, SEXW, block moves TFM, PSHSW/PULSW etc., COMD/NEGD/..., ADCR/
+    ADDR/SUBR/..., CLRD/CLRW/..., LDMD, DECD/INCD/INCW...
+  - `docs/VCC-Notes.md` lists the instructions VCC itself leaves unemulated (ADCD, SBCD, ADCR, SBCR, BAND/BEOR/
+    BIAND/BIEOR/BIOR/BOR, LDBT, STBT): decide whether to implement them properly or match VCC.
+  - Tests: reuse the 6809 test rig (`cpu6809_test.odin`) for emulation-mode compatibility, then per-opcode
+    known-answer tests in native mode.
 - Cassette in/out (CLOAD/CSAVE, WAV and .CAS), `Cassette.cpp`.
 - Joystick hardware (SDL game controllers) and the hi-res joystick ramp modes.
 - Config file (ROM paths, monitor type, key layout, last-used disks) and a key-map editor.
