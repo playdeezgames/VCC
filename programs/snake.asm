@@ -24,7 +24,8 @@ RAND_RANGE	equ $8039
 LOCATE	equ $803C
 
 * VDG screen codes (semigraphics 4 solid blocks: $80 + colour*16 + $0F)
-EMPTY	equ BLANK		; the console's blank
+EMPTY	equ $80			; semigraphics with no quadrant lit: black (the console's
+				; blank is green, which hides the green snake)
 BODY	equ $8F			; green
 HEAD	equ $9F			; yellow
 FOOD	equ $BF			; red
@@ -95,6 +96,7 @@ title	jsr CLS
 	lbeq exit
 
 newgame	jsr CLS
+	jsr clear_field
 	jsr draw_walls
 
 	ldx #SCREEN+8*32+13	; a snake of three, heading right
@@ -313,6 +315,14 @@ drain	jsr POLL
 	rts
 
 * ---- screen ----
+* rows 1-15 black; row 0 stays the green status line
+clear_field	ldx #SCREEN+32
+	lda #EMPTY
+.fill	sta ,x+
+	cmpx #SCREEN_END
+	bne .fill
+	rts
+
 draw_walls	ldx #SCREEN+32
 	ldb #32
 	lda #WALL
