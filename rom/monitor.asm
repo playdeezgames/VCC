@@ -13,6 +13,7 @@
 *   O name start len [entry]  write memory to tape (a file with that name)
 *   I [name [addr]]    read a file from tape ('*' or no name: the first one;
 *                      addr overrides the load address). BREAK stops the wait
+*   N [count]          print count random 16 bit numbers (default 8)
 *   J                  show the joystick axes (0-3F) and buttons
 *   R                  show the registers saved when G came back or SWI hit
 *   T                  show the tick counter
@@ -66,6 +67,8 @@ commands	fcb 'D'
 	fdb cmd_s
 	fcb 'J'
 	fdb cmd_j
+	fcb 'N'
+	fdb cmd_n
 	fcb 'O'
 	fdb cmd_o
 	fcb 'I'
@@ -378,7 +381,7 @@ help	fcb "D [ADDR [LEN]]  DUMP",13
 	fcb "B [DRV]   BOOT FROM DISK",13
 	fcb "G ADDR   CALL (RTS/SWI BACK)",13
 	fcb "R REGISTERS  T TICKS  S BEEP",13
-	fcb "J JOYSTICKS",13
+	fcb "J JOYSTICKS  N [COUNT] RANDOM",13
 	fcb "O NAME ADDR LEN [ENTRY] TAPE",13
 	fcb "I [NAME [ADDR]]  LOAD TAPE",13
 	fcb "NUMBERS ARE HEX",13,0
@@ -425,6 +428,34 @@ msg_ry	fcb " RY=",0
 msg_lx	fcb " LX=",0
 msg_ly	fcb " LY=",0
 msg_btn	fcb "BUTTONS=",0
+
+cmd_n	lbsr parsehex
+	bcs .count
+	ldd #8
+.count	std tmp1
+	clr tmp3		; numbers on this line
+.next	ldd tmp1
+	beq .end
+	subd #1
+	std tmp1
+	jsr rand
+	jsr puthex16
+	inc tmp3
+	lda tmp3
+	cmpa #4
+	beq .line
+	ldd tmp1
+	beq .end
+	lda #' '
+	jsr putc
+	bra .next
+.line	jsr newline
+	clr tmp3
+	bra .next
+.end	tst tmp3
+	beq .done
+	jsr newline
+.done	rts
 
 * ---- tape commands ----
 * File name from the line into the 8 byte field at U (upper case, space

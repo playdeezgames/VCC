@@ -81,7 +81,7 @@ run_ram_program :: proc(t: ^testing.T, m: ^Machine, body: string, timed := false
 		testing.expectf(t, false, "program did not halt (pc=$%04X)", m.cpu.pc)
 		return false
 	}
-	for _ in 0 ..< 2_000_000 {
+	for _ in 0 ..< 20_000_000 {
 		if int(m.cpu.pc) == halt {return true}
 		cpu_exec(&m.cpu, 1)
 	}
@@ -930,4 +930,125 @@ real_basic_csave_then_cload :: proc(t: ^testing.T) {
 	for _ in 0 ..< 600 {machine_run_frame(m)}
 	type_basic(m, "LIST\n", 100)
 	expect_screen_contains(t, m, "10 PRINT \"FROM TAPE\"")
+}
+
+// ---------------------------------------------------------------- random numbers
+
+// The generator written out in Odin: the ROM must produce the same sequence.
+ref_rand :: proc(x: ^u16) -> u16 {
+	x^ ~= x^ << 7
+	x^ ~= x^ >> 9
+	x^ ~= x^ << 8
+	return x^
+}
+
+@(test)
+rand_matches_reference_and_full_period :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	// 70000 calls, storing the first 300 results at $1000 and the state when it
+	// first returns to the seed
+	ok := run_ram_program(t, m, `
+	org $0600
+	ldd #$1234
+	jsr $8036		; rand_seed
+	ldx #$1000
+	ldy #300
+first	jsr $8033
+	std ,x++
+	leay -1,y
+	bne first
+	ldd #$1234		; start again and count until the seed comes round
+	jsr $8036
+	ldy #0
+count	jsr $8033
+	leay 1,y
+	cmpd #$1234
+	bne count
+	sty $0A00
+	ldd #0			; seed 0 must not lock the generator
+	jsr $8036
+	jsr $8033
+	std $0A02
+halt	bra halt
+`)
+	if !ok {return}
+	x := u16(0x1234)
+	for i in 0 ..< 300 {
+		want := ref_rand(&x)
+		got := u16(mem_read8(m, u16(0x1000 + 2 * i))) << 8 | u16(mem_read8(m, u16(0x1001 + 2 * i)))
+		if got != want {
+			testing.expectf(t, false, "value %d: $%04X, want $%04X", i, got, want)
+			break
+		}
+	}
+	period := int(mem_read8(m, 0x0A00)) << 8 | int(mem_read8(m, 0x0A01))
+	testing.expect_value(t, period, 65535) // every non-zero state once
+	after_zero := int(mem_read8(m, 0x0A02)) << 8 | int(mem_read8(m, 0x0A03))
+	testing.expect(t, after_zero != 0)
+}
+
+@(test)
+rand_range_and_key_stirring :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	ok := run_ram_program(t, m, `
+	org $0600
+	ldx #$1000		; 600 dice (0-5)
+	ldy #600
+dice	lda #6
+	jsr $8039
+	sta ,x+
+	leay -1,y
+	bne dice
+	lda #1			; n = 1 is always 0
+	jsr $8039
+	sta $0A00
+	ldx #$1400		; n = 0 means 256: values spread over the whole byte
+	ldy #512
+wide	lda #0
+	jsr $8039
+	sta ,x+
+	leay -1,y
+	bne wide
+halt	bra halt
+`)
+	if !ok {return}
+	counts: [8]int
+	for i in 0 ..< 600 {
+		v := int(mem_read8(m, u16(0x1000 + i)))
+		testing.expectf(t, v < 6, "die %d is %d", i, v)
+		counts[v & 7] += 1
+	}
+	for f in 0 ..< 6 {testing.expectf(t, counts[f] > 60, "face %d came up %d times in 600", f, counts[f])}
+	testing.expect_value(t, mem_read8(m, 0x0A00), 0)
+	big := 0
+	for i in 0 ..< 512 {
+		if mem_read8(m, u16(0x1400 + i)) >= 128 {big += 1}
+	}
+	testing.expect(t, big > 180 && big < 330, "n = 256 uses the whole byte")
+
+	// a key press stirs the state with the clock: two runs that differ in timing differ
+	before := int(mem_read8(m, 0x77)) << 8 | int(mem_read8(m, 0x78))
+	type_text(m, "H\n")
+	after := int(mem_read8(m, 0x77)) << 8 | int(mem_read8(m, 0x78))
+	testing.expect(t, before != after, "key presses stir the generator")
+	testing.expect(t, after != 0)
+}
+
+@(test)
+monitor_random_command :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	type_text(m, "N 6\n")
+	rows := 0
+	for r in 0 ..< 16 {
+		row := screen_row(m, r)
+		if len(row) == 19 && row[4] == ' ' && row[9] == ' ' && row[14] == ' ' {rows += 1} // four numbers
+		if len(row) == 9 && row[4] == ' ' && row != ">N 6" {rows += 100} // the last two
+	}
+	testing.expect_value(t, rows, 101)
 }

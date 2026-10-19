@@ -34,6 +34,7 @@ Files: `boot.asm` (entry points, reset sequence, vectors, init tables),
 | `$0000-$00FF` | direct page: ROM variables (`hw.asm`). The ROM assumes **DP = 0** |
 | `$0100-$0111` | interrupt hook table, six `JMP` slots (below) |
 | `$0120-$012F` | key ring buffer |
+| `$0130-$013E` | tape file header record; `$0140-$0147` the name typed for `I` |
 | `$0200-$023B` | monitor input line (60 characters + terminator) |
 | `$0200-$03FF` | the system stack grows down from `$03FF` |
 | `$0400-$05FF` | 32 x 16 VDG text screen |
@@ -88,6 +89,9 @@ A fixed jump table starts at `$8000`; call these with `JSR`. DP must be 0.
 | `$802A` | joy_buttons | | A = pressed buttons: bit 0 right 1, bit 1 left 1, bit 2 right 2, bit 3 left 2 |
 | `$802D` | tape_save | X -> 15 byte header record | writes the header and `count` bytes from `load`; carry set + A = error on failure |
 | `$8030` | tape_load | X -> 8 byte name (first byte 0: any), Y = load address (0: the file's) | loads the file, leaves its header at `$0130`; carry set + A = error |
+| `$8033` | rand | | D = next pseudo random value, 1-65535 (16 bit xorshift, full period; the same sequence for the same seed) |
+| `$8036` | rand_seed | D = state | 0 is replaced by a fixed non-zero value. The state starts at `$ACE1` and is also stirred with the tick counter on every key press, so programs that wait for the user get a different sequence each run |
+| `$8039` | rand_range | A = n | A = a value in 0..n-1 (n = 0 means 256); scaled from the high byte of `rand`. Preserves B |
 
 Tape error codes: 1 no signal (or the tape ended), 2 checksum, 4 BREAK pressed
 while waiting. Tape routines mask interrupts while they run and switch the
@@ -122,6 +126,7 @@ and digits may be upper or lower case.
 | `W drv trk sec adr [n]` | write sectors from memory |
 | `B [drv]` | boot (below) |
 | `S [loops periods]` | sound; plain `S` beeps |
+| `N [count]` | print `count` random numbers (default 8) |
 | `J` | joystick axes (0-3F) and buttons |
 | `O name start len [entry]` | write memory to tape as file `name` (8 characters) |
 | `I [name [addr]]` | read a file from tape (`*` or no name: the first one; `addr` overrides the load address). Prints `FOUND name` for every file it sees and `LOAD .. LEN .. ENTRY ..` at the end. BREAK abandons the wait |

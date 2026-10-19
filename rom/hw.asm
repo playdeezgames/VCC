@@ -147,6 +147,8 @@ tapedst		equ $6F		; fdb: where block data goes (0 = discard)
 tapeleft	equ $71		; fdb: bytes left to write
 tapenm		equ $73		; fdb: name to look for
 tapeovr		equ $75		; fdb: load address override
+rndstate	equ $77		; fdb: random number generator state
+rndtmp		equ $79		; fdb
 TAPEHDR		equ $0130	; 15 byte file header record: name[8] kind load count entry
 TAPENAME	equ $0140	; 8 byte file name typed at the prompt
 

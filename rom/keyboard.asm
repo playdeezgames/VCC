@@ -158,7 +158,8 @@ kb_press	cmpa #KEY_SHIFT
 	eora #1
 	sta caps
 	rts
-.normal	stb rptkey
+.normal	lbsr rand_stir
+	stb rptkey
 	lda #REPEAT_DELAY
 	sta rptcnt
 	lbsr kb_translate

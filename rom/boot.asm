@@ -29,6 +29,9 @@ api_joy_axis	jmp joy_axis		; $8027
 api_joy_buttons	jmp joy_buttons		; $802A
 api_tape_save	jmp tape_save		; $802D
 api_tape_load	jmp tape_load		; $8030
+api_rand		jmp rand		; $8033
+api_rand_seed	jmp rand_seed		; $8036
+api_rand_range	jmp rand_range		; $8039
 
 	setdp 0
 
@@ -91,6 +94,8 @@ reset	orcc #$50		; IRQ and FIRQ off
 	sta rptkey
 	lda #BLINK_PERIOD
 	sta blinkcnt
+	ldd #RAND_DEFAULT
+	std rndstate
 
 	jsr disk_init
 	jsr cls
@@ -118,6 +123,7 @@ write_table	ldy ,x++
 	include "sound.asm"
 	include "joystick.asm"
 	include "tape.asm"
+	include "random.asm"
 	include "monitor.asm"
 
 * ---- initialisation data ----
