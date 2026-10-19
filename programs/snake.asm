@@ -33,6 +33,7 @@ WALL	equ $CF			; buff
 * the playfield: walls on rows 1 and 15, columns 0 and 31
 FIELD_W	equ 30
 FIELD_H	equ 13
+GROWTH	equ 3		; cells the snake grows per apple
 START_DELAY	equ 9		; ticks (1/60 s) between moves
 MIN_DELAY	equ 3
 WIN_LENGTH	equ 380
@@ -52,6 +53,8 @@ quit	equ V+16	; fcb
 ate	equ V+17	; fcb
 tdigit	equ V+18	; fcb
 divisor	equ V+19	; fdb
+pending	equ V+21	; fcb: cells still to grow
+lenchg	equ V+22	; fcb: the length changed, redraw the status line
 QBUF	equ $1000	; ring buffer of body cell addresses (2 bytes each)
 QEND	equ $1400
 
@@ -93,11 +96,6 @@ title	jsr CLS
 
 newgame	jsr CLS
 	jsr draw_walls
-	lda #0
-	ldb #0
-	jsr LOCATE
-	ldx #txt_score
-	jsr PUTS
 
 	ldx #SCREEN+8*32+13	; a snake of three, heading right
 	stx qtail
@@ -124,6 +122,8 @@ newgame	jsr CLS
 	std len
 	ldd #0
 	std score
+	clr pending
+	clr lenchg
 	lda #START_DELAY
 	sta delay
 	jsr drain
@@ -177,7 +177,15 @@ step	ldd head
 	beq .eat
 	cmpa #EMPTY
 	lbne .dead
-	ldx qtail		; plain move: the tail cell empties
+.advance	lda pending		; still growing: the tail stays where it is
+	beq .shrink
+	dec pending
+	ldd len
+	addd #1
+	std len
+	inc lenchg
+	bra .place
+.shrink	ldx qtail		; plain move: the tail cell empties
 	ldy ,x++
 	lda #EMPTY
 	sta ,y
@@ -190,9 +198,10 @@ step	ldd head
 	ldd score
 	addd #1
 	std score
-	ldd len
-	addd #1
-	std len
+	lda pending
+	adda #GROWTH
+	sta pending
+	bra .advance
 .place	ldx head		; the old head becomes body
 	lda #BODY
 	sta ,x
@@ -205,7 +214,11 @@ step	ldd head
 	blo .queued
 	ldx #QBUF
 .queued	stx qhead
-	tst ate
+	tst lenchg
+	beq .nogrow
+	clr lenchg
+	jsr show_score		; the length changed
+.nogrow	tst ate
 	beq .done
 	ldx #20			; a short chirp
 	ldy #12
@@ -217,8 +230,7 @@ step	ldd head
 	cmpa #MIN_DELAY
 	bls .slow
 	dec delay
-.slow	jsr show_score
-	ldd len
+.slow	ldd len
 	cmpd #WIN_LENGTH
 	lbhs .win
 	jsr new_food
@@ -321,10 +333,16 @@ draw_walls	ldx #SCREEN+32
 	bne .side
 	rts
 
-show_score	lda #13
+show_score	lda #0
 	ldb #0
 	jsr LOCATE
+	ldx #txt_score
+	jsr PUTS
 	ldd score
+	bsr print_dec
+	ldx #txt_length
+	jsr PUTS
+	ldd len
 	bsr print_dec
 	rts
 
@@ -354,7 +372,8 @@ txt_help1	fcn "ARROW KEYS OR WASD STEER"
 txt_help2	fcn "EAT THE RED BLOCKS TO GROW"
 txt_help3	fcn "BREAK QUITS"
 txt_press	fcn "PRESS ANY KEY"
-txt_score	fcn "SNAKE  SCORE"
+txt_score	fcn "SNAKE  SCORE "
+txt_length	fcn "  LENGTH "
 txt_over	fcn "GAME OVER"
 txt_again	fcn "ANY KEY: AGAIN"
 

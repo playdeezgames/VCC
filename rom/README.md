@@ -177,7 +177,7 @@ loads it; start it with `B` at the prompt:
 ```
 
 * `snake.asm`: Snake on the text screen (arrow keys or WASD, eat the red
-  blocks, BREAK quits). It uses `locate`, `puts`, `poll`, `getc`, `rand_range`
+  blocks, each one makes the snake three cells longer; BREAK quits). It uses `locate`, `puts`, `poll`, `getc`, `rand_range`
   and `tone`, writes screen codes (semigraphics blocks) straight to `$0400`,
   keeps its state at `$0F00` and the body queue at `$1000`.
 

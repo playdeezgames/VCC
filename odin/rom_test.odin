@@ -1118,7 +1118,7 @@ snake_game_plays :: proc(t: ^testing.T) {
 	expect_row(t, m, "           S N A K E") // the title screen
 	tap_key(m, .SPACE)
 	settle(m, 1)
-	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 000")
+	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 000  LENGTH 003")
 	testing.expect_value(t, screen_code(m, 1, 0), 0xCF) // walls
 	testing.expect_value(t, screen_code(m, 15, 31), 0xCF)
 	h := snake_word(m, head_var)
@@ -1149,15 +1149,25 @@ snake_game_plays :: proc(t: ^testing.T) {
 	mem_write8(m, u16(food_var + 1), u8(ahead))
 	c := snake_wait_move(m, head_var)
 	testing.expect_value(t, c, ahead)
-	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 001")
+	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 001  LENGTH 004")
 	testing.expect_value(t, snake_word(m, len_var), 4)
+	// one apple makes the snake three cells longer, one cell per move
+	snake_wait_move(m, head_var)
+	snake_wait_move(m, head_var)
+	testing.expect_value(t, snake_word(m, len_var), 6)
+	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 001  LENGTH 006")
+	cells := 0
+	for a in 0x0400 + 32 ..< 0x0600 {
+		if c := mem_read8(m, u16(a)); c == 0x8F || c == 0x9F {cells += 1}
+	}
+	testing.expect_value(t, cells, 6)
 
 	// carry on into the wall: game over
 	settle(m, 400)
 	expect_screen_contains(t, m, "GAME OVER")
 	tap_key(m, .SPACE)
 	settle(m, 2)
-	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 000") // a new game
+	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 000  LENGTH 003") // a new game
 
 	// BREAK ends the program and the monitor is back
 	tap_key(m, .ESCAPE)
@@ -1174,7 +1184,7 @@ snake_rom_boots_into_the_game :: proc(t: ^testing.T) {
 	expect_row(t, m, "           S N A K E") // straight into the title screen
 	tap_key(m, .SPACE)
 	settle(m, 2)
-	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 000")
+	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 000  LENGTH 003")
 	testing.expect_value(t, screen_code(m, 1, 0), 0xCF)
 	// BREAK leaves the game; the monitor is still there
 	tap_key(m, .ESCAPE)
