@@ -42,6 +42,14 @@ PIA1_CRA	equ $FF21
 PIA1_DB		equ $FF22	; bits 7-3: VDG A/G, GM2-GM0, CSS; bit 1: sound
 PIA1_CRB	equ $FF23
 
+* ---- FD-502 floppy controller: latch at $FF40, WD1793 at $FF48 ----
+FDC_CTRL	equ $FF40	; write only: bits 0-2 drive 0-2, 3 motor, 5 density, 6 drive 3
+FDC_CMD		equ $FF48	; command (write) / status (read)
+FDC_STATUS	equ $FF48
+FDC_TRACK	equ $FF49
+FDC_SECTOR	equ $FF4A
+FDC_DATA	equ $FF4B
+
 * ---- GIME ----
 INIT0		equ $FF90
 INIT1		equ $FF91
@@ -103,8 +111,31 @@ tmp1		equ $40		; fdb scratch
 tmp2		equ $42		; fdb
 tmp3		equ $44		; fdb
 ndig		equ $46		; fcb
+dskctl		equ $47		; fcb: shadow of the $FF40 latch, 0 = motor off
+dskarg		equ $48		; fcb: drive of the current operation
+dsktrk		equ $49		; 4 bytes: head track per drive, $FF = unknown
+dskbusy		equ $4D		; fcb: non-zero while a disk operation runs
+dskidle		equ $4E		; fcb: ticks until the motor is switched off
+dsktgt		equ $4F		; fcb: track wanted
+dsksec		equ $50		; fcb: sector wanted
+dskbuf		equ $51		; fdb: transfer address
+argdrv		equ $53		; monitor disk command arguments
+argtrk		equ $54
+argsec		equ $55
+argop		equ $56		; 0 = read, 1 = write
+argadr		equ $57		; fdb
+argcnt		equ $59		; fdb
+dskerr		equ $5B		; fcb: result code of the last disk call
+bootent		equ $5C		; fdb: entry address from a boot sector
+dsktmp		equ $5E		; fdb: scratch of the disk driver
+kbt1		equ $60		; scratch of the IRQ handler (never shared with foreground code)
+kbt2		equ $61
+kbt3		equ $62
 
 KBBUF		equ $0120	; 16 byte key ring buffer
 LINEBUF		equ $0200	; input line, LINEMAX characters plus a terminator
 LINEMAX		equ 60
+BOOT_BUF	equ $0700	; sector read by the B command
+SECTORS		equ 18		; sectors per track (DECB geometry, single sided)
+DISK_IDLE	equ 180		; ticks (3 s) without disk use before the motor stops
 BLINK_PERIOD	equ 30		; ticks between cursor toggles

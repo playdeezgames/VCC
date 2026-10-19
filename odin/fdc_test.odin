@@ -118,8 +118,7 @@ read_sector_streams_bytes_then_finishes :: proc(t: ^testing.T) {
 	testing.expect_value(t, m.fdc.status, FDC_BUSY | FDC_DRQ)
 	data := read_sector_bytes(m)
 	testing.expect(t, data == pattern)
-	testing.expect(t, m.fdc.status & FDC_DRQ != 0)
-	fdc_read(m, 0x4B) // the extra read finishes the command
+	// the last byte ends the command (no extra read needed)
 	testing.expect_value(t, m.fdc.status, FDC_READY)
 	testing.expect_value(t, m.fdc.cmd, CMD_IDLE)
 	testing.expect_value(t, m.fdc.sector, 6) // sector register advanced
@@ -134,7 +133,6 @@ no_nmi_when_enable_bit_clear :: proc(t: ^testing.T) {
 	fdc_write(m, 0x4A, 1)
 	fdc_write(m, 0x48, 0x80)
 	read_sector_bytes(m)
-	fdc_read(m, 0x4B)
 	testing.expect(t, !nmi_pending(m))
 	testing.expect_value(t, m.fdc.cmd, CMD_IDLE)
 }

@@ -4,6 +4,10 @@
 *   M addr [byte...]   store bytes at addr (without bytes: show the byte there)
 *   F start end byte   fill start..end inclusive
 *   C src dst len      copy memory (overlap safe)
+*   L drv trk sec adr [n]  read n sectors (default 1) into memory
+*   W drv trk sec adr [n]  write n sectors from memory
+*   B [drv]            boot: load and run the program described by track 0
+*                      sector 1 (see below)
 *   G addr             call addr; RTS or SWI returns to the monitor
 *   R                  show the registers saved when G came back or SWI hit
 *   T                  show the tick counter
@@ -47,6 +51,12 @@ commands	fcb 'D'
 	fdb cmd_c
 	fcb 'G'
 	fdb cmd_g
+	fcb 'L'
+	fdb cmd_l
+	fcb 'W'
+	fdb cmd_w
+	fcb 'B'
+	fdb cmd_b
 	fcb 'R'
 	fdb cmd_r
 	fcb 'T'
@@ -351,9 +361,145 @@ help	fcb "D [ADDR [LEN]]  DUMP",13
 	fcb "M ADDR [BYTE..] STORE/SHOW",13
 	fcb "F START END BYTE  FILL",13
 	fcb "C SRC DST LEN     COPY",13
+	fcb "L/W DRV TRK SEC ADR [N]",13
+	fcb "B [DRV]   BOOT FROM DISK",13
 	fcb "G ADDR   CALL (RTS/SWI BACK)",13
 	fcb "R   REGISTERS   T   TICKS",13
 	fcb "NUMBERS ARE HEX",13,0
+
+* ---- disk commands ----
+cmd_l	clr argop
+	bra disk_cmd
+cmd_w	lda #1
+	sta argop
+disk_cmd	lbsr parsehex
+	lbcc cmd_error
+	tsta
+	lbne cmd_error
+	cmpb #3
+	lbhi cmd_error
+	stb argdrv
+	lbsr parsehex
+	lbcc cmd_error
+	tsta
+	lbne cmd_error
+	stb argtrk
+	lbsr parsehex
+	lbcc cmd_error
+	tsta
+	lbne cmd_error
+	tstb
+	lbeq cmd_error
+	cmpb #SECTORS
+	lbhi cmd_error
+	stb argsec
+	lbsr parsehex
+	lbcc cmd_error
+	std argadr
+	lbsr parsehex
+	bcs .count
+	ldd #1
+.count	std argcnt
+	lbeq cmd_error
+	lbsr disk_run
+	bcs disk_report
+	rts
+
+* Print the disk error code in A.
+disk_report	pshs a
+	ldx #msg_diskerr
+	jsr puts
+	puls a
+	jsr puthex8
+	jsr newline
+	rts
+msg_diskerr	fcb "DISK ERROR ",0
+
+* Transfer argcnt sectors between the disk (argdrv, argtrk, argsec) and memory
+* (argadr), one sector after the other; sector 18 is followed by sector 1 of
+* the next track. Carry set and A = error code on failure.
+disk_run	ldd argcnt
+	beq .ok
+	ldx argadr
+	ldb argsec
+	clra
+	tfr d,y
+	lda argdrv
+	ldb argtrk
+	tst argop
+	bne .write
+	jsr disk_read
+	bra .done
+.write	jsr disk_write
+.done	bcs .end
+	ldd argadr
+	adda #1			; next 256 bytes
+	std argadr
+	inc argsec
+	lda argsec
+	cmpa #SECTORS+1
+	blo .same
+	lda #1
+	sta argsec
+	inc argtrk
+.same	ldd argcnt
+	subd #1
+	std argcnt
+	bra disk_run
+.ok	andcc #$FE
+.end	rts
+
+* ---- boot ----
+* Track 0 sector 1 is the boot sector:
+*   +0  'O','B'   signature
+*   +2  load address (word)
+*   +4  number of sectors to load (0-17), taken from track 0 sectors 2...
+*   +5  entry address (word)
+* The monitor calls the entry address (JSR); RTS comes back to the prompt.
+BOOT_SIG	equ $4F42
+
+cmd_b	lbsr parsehex
+	bcs .drive
+	ldd #0
+.drive	tsta
+	lbne cmd_error
+	cmpb #3
+	lbhi cmd_error
+	stb argdrv
+	clr argop
+	clr argtrk
+	lda #1
+	sta argsec
+	ldd #BOOT_BUF
+	std argadr
+	ldd #1
+	std argcnt
+	lbsr disk_run
+	lbcs disk_report
+	ldx #BOOT_BUF
+	ldd ,x
+	cmpd #BOOT_SIG
+	bne .noboot
+	ldd 2,x
+	std argadr
+	ldd 5,x
+	std bootent
+	lda 4,x
+	cmpa #SECTORS-1
+	bhi .noboot
+	clr argcnt
+	sta argcnt+1
+	lda #2
+	sta argsec
+	lbsr disk_run
+	lbcs disk_report
+	ldx bootent
+	jsr ,x
+	rts
+.noboot	ldx #msg_noboot
+	jsr puts
+	rts
+msg_noboot	fcb "NO BOOT",13,0
 
 * SWI (from a program started with G, or a breakpoint): save the registers
 * of the interrupted program and go back to the prompt.

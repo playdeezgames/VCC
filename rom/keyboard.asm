@@ -45,6 +45,7 @@ irq_handler	clra
 	inc ticks
 .counted	lbsr kb_irq
 	lbsr blink
+	lbsr disk_tick
 .exit	rti
 
 * ---- one scan and its processing ----
@@ -62,48 +63,48 @@ kb_irq	ldx #kbcur		; read the 8 columns
 	lda #$FF
 	sta PIA0_DB
 
-	clr tmp1		; phase 1: debounce every column
+	clr kbt1		; phase 1: debounce every column
 .deb	ldx #kbcur
-	ldb tmp1
+	ldb kbt1
 	abx
 	lda ,x
-	sta tmp2		; this scan
+	sta kbt2		; this scan
 	anda 8,x		; seen before too
-	sta tmp3
+	sta kbt3
 	ldb 16,x
 	comb
-	andb tmp3		; stable now, not before
+	andb kbt3		; stable now, not before
 	stb 24,x
-	lda tmp3
+	lda kbt3
 	sta 16,x
-	lda tmp2
+	lda kbt2
 	sta 8,x
-	inc tmp1
-	lda tmp1
+	inc kbt1
+	lda kbt1
 	cmpa #8
 	bne .deb
 
-	clr tmp1		; phase 2: new presses, all columns
+	clr kbt1		; phase 2: new presses, all columns
 .new	ldx #kbnew
-	ldb tmp1
+	ldb kbt1
 	abx
 	lda ,x
 	beq .nextcol
-	sta tmp3
-	clr tmp2		; row bit number
-.bit	lsr tmp3
+	sta kbt3
+	clr kbt2		; row bit number
+.bit	lsr kbt3
 	bcc .nobit
-	lda tmp2
+	lda kbt2
 	asla
 	asla
 	asla
-	adda tmp1
+	adda kbt1
 	lbsr kb_press
-.nobit	inc tmp2
-	tst tmp3
+.nobit	inc kbt2
+	tst kbt3
 	bne .bit
-.nextcol	inc tmp1
-	lda tmp1
+.nextcol	inc kbt1
+	lda kbt1
 	cmpa #8
 	bne .new
 

@@ -21,6 +21,8 @@ api_puthex8	jmp puthex8		; $800F
 api_puthex16	jmp puthex16		; $8012
 api_getc	jmp getc		; $8015
 api_poll	jmp poll		; $8018
+api_disk_read	jmp disk_read		; $801B
+api_disk_write	jmp disk_write		; $801E
 
 	setdp 0
 
@@ -84,6 +86,7 @@ reset	orcc #$50		; IRQ and FIRQ off
 	lda #BLINK_PERIOD
 	sta blinkcnt
 
+	jsr disk_init
 	jsr cls
 	ldx #banner
 	jsr puts
@@ -105,6 +108,7 @@ write_table	ldy ,x++
 
 	include "console.asm"
 	include "keyboard.asm"
+	include "disk.asm"
 	include "monitor.asm"
 
 * ---- initialisation data ----

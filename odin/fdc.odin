@@ -422,17 +422,25 @@ fdc_get_sector_byte :: proc(m: ^Machine) -> (ret: u8) {
 		f.xfer_idx += 1
 		f.status = FDC_BUSY | FDC_DRQ
 		f.io_wait = 0
-	} else {
-		f.status = FDC_READY
-		fdc_command_done(m)
-		if f.lost_data {
-			f.status = FDC_LOSTDATA
-			f.lost_data = false
+		if f.xfer_idx == f.xfer_size {
+			fdc_finish_read(m) // the last byte ends the command, as on the real chip
 		}
-		f.sector += 1
+	} else {
+		fdc_finish_read(m)
 	}
 	_ = img
 	return
+}
+
+fdc_finish_read :: proc(m: ^Machine) {
+	f := &m.fdc
+	f.status = FDC_READY
+	fdc_command_done(m)
+	if f.lost_data {
+		f.status = FDC_LOSTDATA
+		f.lost_data = false
+	}
+	f.sector += 1
 }
 
 // JVC: the head must be over the requested track and the sector must exist.
@@ -496,22 +504,31 @@ fdc_put_sector_byte :: proc(m: ^Machine, v: u8) {
 		}
 	}
 	if f.xfer_idx >= f.xfer_size {
-		ok := false
-		if img.file != nil {
-			ok = disk.write_sector(img, int(f.side), int(f.head_pos[f.cur]), int(f.sector), f.xfer[:f.xfer_size])
-		}
-		f.status = FDC_READY
-		if !ok || f.lost_data {f.status = FDC_LOSTDATA}
-		if img.write_protect {f.status = FDC_WRITEPROTECT | FDC_RECNOTFOUND}
-		fdc_command_done(m)
-		f.lost_data = false
-		f.sector += 1
+		fdc_finish_write(m)
 	} else {
 		f.xfer[f.xfer_idx] = v
 		f.xfer_idx += 1
 		f.status = FDC_BUSY | FDC_DRQ
 		f.io_wait = 0
+		if f.xfer_idx == f.xfer_size {
+			fdc_finish_write(m) // the last byte ends the command, as on the real chip
+		}
 	}
+}
+
+fdc_finish_write :: proc(m: ^Machine) {
+	f := &m.fdc
+	img := &f.drives[f.cur]
+	ok := false
+	if img.file != nil {
+		ok = disk.write_sector(img, int(f.side), int(f.head_pos[f.cur]), int(f.sector), f.xfer[:f.xfer_size])
+	}
+	f.status = FDC_READY
+	if !ok || f.lost_data {f.status = FDC_LOSTDATA}
+	if img.write_protect {f.status = FDC_WRITEPROTECT | FDC_RECNOTFOUND}
+	fdc_command_done(m)
+	f.lost_data = false
+	f.sector += 1
 }
 
 // WRITE TRACK (format): scan the track image for ID and data address marks
