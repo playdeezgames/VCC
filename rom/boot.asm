@@ -19,6 +19,8 @@ api_puts	jmp puts		; $8009
 api_newline	jmp newline		; $800C
 api_puthex8	jmp puthex8		; $800F
 api_puthex16	jmp puthex16		; $8012
+api_getc	jmp getc		; $8015
+api_poll	jmp poll		; $8018
 
 	setdp 0
 
@@ -71,12 +73,25 @@ reset	orcc #$50		; IRQ and FIRQ off
 	cmpx #HOOK_END
 	bne .hook
 
+	ldx #irq_handler	; real handlers for IRQ (tick, keyboard) and SWI (monitor)
+	stx HOOK_IRQ+1
+	ldx #swi_handler
+	stx HOOK_SWI+1
+	lda #1
+	sta caps
+	lda #$FF
+	sta rptkey
+	lda #BLINK_PERIOD
+	sta blinkcnt
+
 	jsr cls
 	ldx #banner
 	jsr puts
-	ldx #prompt
-	jsr puts
-idle	bra idle
+
+	lda #$35		; CB1 (vertical sync) interrupt on the falling edge
+	sta PIA0_CRB
+	andcc #$EF		; IRQ on (FIRQ stays masked)
+	jmp monitor
 
 rti_stub	rti
 
@@ -89,6 +104,8 @@ write_table	ldy ,x++
 .end	rts
 
 	include "console.asm"
+	include "keyboard.asm"
+	include "monitor.asm"
 
 * ---- initialisation data ----
 * (address, value) pairs
@@ -168,8 +185,8 @@ palette_init	fcb $12,$24,$0B,$07,$3F,$1F,$09,$26
 	fcb $00,$12,$00,$3F,$00,$12,$00,$26
 
 banner	fcb "COCO 3 OPEN ROM V0.1",13
-	fcb "ORIGINAL BOOT ROM, GPLV3",13,13,0
-prompt	fcb ">",0
+	fcb "ORIGINAL BOOT ROM, GPLV3",13
+	fcb "H FOR HELP",13,13,0
 
 	if *>$C000
 	error ROM code overflows into the cartridge space

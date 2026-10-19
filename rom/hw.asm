@@ -76,3 +76,35 @@ SAM_TY		equ $FFDE
 	setdp 0
 cursor		equ $00		; fdb: address of the cursor cell on the screen
 under		equ $02		; fcb: the screen byte hidden under the cursor
+curvis		equ $03		; fcb: 1 while the cursor is drawn
+cblock		equ $04		; fcb: non-zero while putc/cls change the screen (no blinking)
+ticks		equ $05		; 4 bytes, big endian: 60 Hz interrupt count
+blinkcnt	equ $09		; fcb: ticks until the cursor toggles
+kbhead		equ $0A		; fcb: key ring buffer read index
+kbtail		equ $0B		; fcb: write index
+caps		equ $0C		; fcb: 1 = letters come out upper case unshifted (CoCo style)
+rptkey		equ $0D		; fcb: key id being repeated, $FF = none
+rptcnt		equ $0E		; fcb: ticks until the next repeat
+kbcur		equ $10		; 8 bytes: this scan, one byte of row bits per column
+kbprev		equ kbcur+8	; the scan before
+kbstab		equ kbcur+16	; keys seen in two scans in a row (debounced)
+kbnew		equ kbcur+24	; keys that became stable in this scan
+lineptr		equ $30		; fdb: parse position in the input line
+lastdump	equ $32		; fdb: next address for D
+rega		equ $34		; registers saved after G / SWI
+regb		equ $35
+regdp		equ $36
+regcc		equ $37
+regx		equ $38		; fdb
+regy		equ $3A		; fdb
+regu		equ $3C		; fdb
+regpc		equ $3E		; fdb
+tmp1		equ $40		; fdb scratch
+tmp2		equ $42		; fdb
+tmp3		equ $44		; fdb
+ndig		equ $46		; fcb
+
+KBBUF		equ $0120	; 16 byte key ring buffer
+LINEBUF		equ $0200	; input line, LINEMAX characters plus a terminator
+LINEMAX		equ 60
+BLINK_PERIOD	equ 30		; ticks between cursor toggles

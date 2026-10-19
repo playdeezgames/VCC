@@ -26,18 +26,38 @@ to_vdg	cmpa #$60
 	rts
 
 cur_hide	pshs x,a
+	tst curvis
+	beq .end
 	ldx cursor
 	lda under
 	sta ,x
-	puls a,x,pc
+	clr curvis
+.end	puls a,x,pc
 
 cur_show	pshs x,a
+	tst curvis
+	bne .end
 	ldx cursor
 	lda ,x
 	sta under
 	eora #$40
 	sta ,x
-	puls a,x,pc
+	lda #1
+	sta curvis
+.end	puls a,x,pc
+
+* Called every tick: toggle the cursor unless the screen is being changed.
+blink	tst cblock
+	bne .end
+	dec blinkcnt
+	bne .end
+	lda #BLINK_PERIOD
+	sta blinkcnt
+	tst curvis
+	beq .on
+	bra cur_hide
+.on	bra cur_show
+.end	rts
 
 clear_screen	pshs x,a
 	ldx #SCREEN
@@ -47,10 +67,14 @@ clear_screen	pshs x,a
 	bne .fill
 	ldx #SCREEN
 	stx cursor
+	clr curvis		; the cursor cell was overwritten
 	puls a,x,pc
 
-cls	bsr clear_screen
-	bra cur_show
+cls	inc cblock
+	bsr clear_screen
+	bsr cur_show
+	dec cblock
+	rts
 
 * Scroll the screen up one row; the cursor goes to the start of the last row.
 scroll	pshs d,x,y
@@ -83,7 +107,8 @@ newline_raw	pshs d
 	puls d,pc
 
 putc	pshs d,x,y
-	bsr cur_hide
+	inc cblock
+	lbsr cur_hide
 	cmpa #$0D
 	beq .newline
 	cmpa #$08
@@ -114,6 +139,9 @@ putc	pshs d,x,y
 	bra .done
 .formfeed	lbsr clear_screen
 .done	lbsr cur_show
+	lda #BLINK_PERIOD
+	sta blinkcnt		; solid cursor for a while after output
+	dec cblock
 	puls d,x,y,pc
 
 newline	pshs a

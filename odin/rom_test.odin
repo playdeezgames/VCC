@@ -68,6 +68,7 @@ run_ram_program :: proc(t: ^testing.T, m: ^Machine, body: string) -> bool {
 		if res.written[addr] {mem_write8(m, u16(addr), res.mem[addr])}
 	}
 	halt, _ := asm6809.symbol_value(&res, "halt")
+	m.cpu.sync_waiting = false // the monitor sleeps in SYNC while it waits for a key
 	m.cpu.pc = 0x0600
 	for _ in 0 ..< 2_000_000 {
 		if int(m.cpu.pc) == halt {return true}
@@ -93,14 +94,14 @@ boot_rom_shows_banner_and_prompt :: proc(t: ^testing.T) {
 	defer test_machine_free(m)
 	testing.expect_value(t, screen_row(m, 0), "COCO 3 OPEN ROM V0.1")
 	testing.expect_value(t, screen_row(m, 1), "ORIGINAL BOOT ROM, GPLV3")
-	testing.expect_value(t, screen_row(m, 2), "")
-	testing.expect_value(t, screen_row(m, 3), ">")
-	testing.expect_value(t, screen_row(m, 4), "")
+	testing.expect_value(t, screen_row(m, 2), "H FOR HELP")
+	testing.expect_value(t, screen_row(m, 3), "")
+	testing.expect_value(t, screen_row(m, 4), ">")
 	// the cursor is the cell after the prompt, shown in inverse video
-	testing.expect_value(t, screen_code(m, 3, 0), 0x40 | '>' & 0x3F)
-	testing.expect_value(t, screen_code(m, 3, 1), BLANK ~ 0x40)
-	// boot state: interrupts masked, SAM/GIME set up for the compat text screen
-	testing.expect(t, flag(&m.cpu, .I) && flag(&m.cpu, .F))
+	testing.expect_value(t, screen_code(m, 4, 0), 0x40 | '>' & 0x3F)
+	testing.expect_value(t, screen_code(m, 4, 1), BLANK ~ 0x40)
+	// boot state: IRQ on (vertical sync tick), FIRQ masked, SAM/GIME set up for the compat text screen
+	testing.expect(t, !flag(&m.cpu, .I) && flag(&m.cpu, .F))
 	testing.expect_value(t, m.sam_dis_offset, 2)
 	testing.expect_value(t, m.gime_regs[0x90], 0x80)
 }
@@ -165,7 +166,6 @@ halt	bra halt
 	testing.expect_value(t, m.cpu.a, 0xBE)
 	testing.expect_value(t, m.cpu.y, 0x9ABC)
 	testing.expect_value(t, m.cpu.u, 0x1357)
-	testing.expect_value(t, m.cpu.s, 0x03FF)
 }
 
 @(test)
@@ -229,4 +229,124 @@ halt	bra halt
 	if !ok {return}
 	testing.expect_value(t, screen_row(m, 14), "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
 	testing.expect_value(t, screen_row(m, 15), "")
+}
+
+// ---------------------------------------------------------------- keyboard and monitor
+
+// Type text on the emulated keyboard (CoCo style: unshifted letters are upper
+// case) and let the ROM process it.
+type_text :: proc(m: ^Machine, text: string) {
+	saved := paste_enter_frames
+	paste_enter_frames = 3
+	defer paste_enter_frames = saved
+	paste_text(m, text)
+	for paste_active(m) {
+		paste_step(m)
+		machine_run_frame(m)
+	}
+	for _ in 0 ..< 8 {machine_run_frame(m)}
+}
+
+expect_screen_contains :: proc(t: ^testing.T, m: ^Machine, needle: string, loc := #caller_location) {
+	text := screen_text(m)
+	testing.expectf(t, strings.contains(text, needle), "screen lacks %q:\n%s", needle, text, loc = loc)
+}
+
+// Is there a screen row with exactly this text?
+expect_row :: proc(t: ^testing.T, m: ^Machine, row: string, loc := #caller_location) {
+	for r in 0 ..< 16 {
+		if screen_row(m, r) == row {return}
+	}
+	testing.expectf(t, false, "no screen row %q:\n%s", row, screen_text(m), loc = loc)
+}
+
+@(test)
+monitor_fill_and_dump :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	type_text(m, "F 0600 060F AA\nD 0600 10\n")
+	expect_screen_contains(t, m, "0600 AA AA AA AA AA AA AA AA")
+	expect_screen_contains(t, m, "0608 AA AA AA AA AA AA AA AA")
+	testing.expect_value(t, mem_read8(m, 0x0600), 0xAA)
+	testing.expect_value(t, mem_read8(m, 0x060F), 0xAA)
+	testing.expect(t, mem_read8(m, 0x0610) != 0xAA)
+}
+
+@(test)
+monitor_modify_copy_and_lower_case :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	type_text(m, "M 0620 01 02 03 04 05\n")
+	for i in 0 ..< 5 {testing.expect_value(t, mem_read8(m, u16(0x620 + i)), u8(i + 1))}
+	type_text(m, "C 0620 0622 5\n") // overlapping, destination above
+	for i in 0 ..< 5 {testing.expect_value(t, mem_read8(m, u16(0x622 + i)), u8(i + 1))}
+	type_text(m, "C 0622 0620 5\n") // overlapping, destination below
+	for i in 0 ..< 5 {testing.expect_value(t, mem_read8(m, u16(0x620 + i)), u8(i + 1))}
+	// shifted letters are lower case; commands and digits accept both
+	type_text(m, "m $0630 0a Ff\n")
+	testing.expect_value(t, mem_read8(m, 0x0630), 0x0A)
+	testing.expect_value(t, mem_read8(m, 0x0631), 0xFF)
+	type_text(m, "M 0630\n") // shows the byte
+	expect_row(t, m, "0A")
+}
+
+@(test)
+monitor_go_swi_and_registers :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	type_text(m, "M 0630 86 55 39\nG 0630\nR\n") // lda #$55 ; rts
+	expect_screen_contains(t, m, "A=55 B=30")
+	// a routine ending in SWI lands back in the monitor too
+	type_text(m, "M 0640 C6 77 3F\nG 0640\n") // ldb #$77 ; swi
+	expect_screen_contains(t, m, "SWI AT 0642")
+	type_text(m, "R\n")
+	expect_screen_contains(t, m, "B=77")
+	type_text(m, "F 0650 0650 5A\n") // and it still takes commands
+	testing.expect_value(t, mem_read8(m, 0x0650), 0x5A)
+}
+
+@(test)
+monitor_ticks_errors_help_backspace :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	for _ in 0 ..< 20 {machine_run_frame(m)}
+	ticks := int(mem_read8(m, 7)) << 8 | int(mem_read8(m, 8))
+	testing.expect(t, ticks >= 20, "the tick counter did not run")
+	type_text(m, "Z\n")
+	expect_row(t, m, "?")
+	type_text(m, "F 0600 05 1\n") // end below start
+	expect_row(t, m, "?")
+	type_text(m, "H\n")
+	expect_screen_contains(t, m, "NUMBERS ARE HEX")
+	// BACKSPACE edits the line: "H", back, "T" is the T command
+	type_text(m, "")
+	type_text(m, "H")
+	tap_key(m, .BACKSPACE)
+	type_text(m, "T\n")
+	expect_screen_contains(t, m, "TICKS 0000")
+}
+
+@(test)
+keyboard_repeat_and_cursor_blink :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	// the cursor cell takes both values while the system idles
+	seen: [256]bool
+	for _ in 0 ..< 80 {
+		machine_run_frame(m)
+		seen[screen_code(m, 4, 1)] = true
+	}
+	testing.expect(t, seen[BLANK] && seen[BLANK ~ 0x40], "cursor does not blink")
+	// hold A down: one character at once, then repeats
+	machine_key_event(m, .A, true)
+	for _ in 0 ..< 100 {machine_run_frame(m)}
+	machine_key_event(m, .A, false)
+	for _ in 0 ..< 8 {machine_run_frame(m)}
+	row := screen_row(m, 4)
+	testing.expectf(t, strings.count(row, "A") >= 8, "held key gave %q", row)
 }
