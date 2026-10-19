@@ -5,9 +5,12 @@
 *
 * Build a bootable disk:  programs/build.sh   (makes programs/snake.dsk)
 * Play:  ./vcc --rom rom/ourrom.rom --disk0 programs/snake.dsk, then B at the prompt.
-* Or load it any other way and  G 0800.
+* Or load it any other way and  G 0800. rom/snakerom.asm builds a ROM that
+* starts it at power-up (the game then returns to the monitor on BREAK).
 
+	ifndef HW_INCLUDED
 	include "../rom/hw.asm"
+	endif
 
 * ROM entry points (rom/README.md)
 CLS	equ $8003
@@ -52,7 +55,9 @@ divisor	equ V+19	; fdb
 QBUF	equ $1000	; ring buffer of body cell addresses (2 bytes each)
 QEND	equ $1400
 
-	org $0800
+	ifndef AUTOSTART
+	org $0800		; (built into the ROM by rom/snakerom.asm: no org)
+	endif
 
 start	clr quit
 title	jsr CLS
@@ -353,4 +358,3 @@ txt_score	fcn "SNAKE  SCORE"
 txt_over	fcn "GAME OVER"
 txt_again	fcn "ANY KEY: AGAIN"
 
-	end

@@ -100,12 +100,20 @@ reset	orcc #$50		; IRQ and FIRQ off
 
 	jsr disk_init
 	jsr cls
+	ifndef AUTOSTART
 	ldx #banner
 	jsr puts
+	endif
 
 	lda #$35		; CB1 (vertical sync) interrupt on the falling edge
 	sta PIA0_CRB
 	andcc #$EF		; IRQ on (FIRQ stays masked)
+	ifdef AUTOSTART
+	jsr start		; the built-in program (rom/snakerom.asm); BREAK ends it
+	jsr cls
+	ldx #banner
+	jsr puts
+	endif
 	jmp monitor
 
 rti_stub	rti
@@ -126,6 +134,9 @@ write_table	ldy ,x++
 	include "tape.asm"
 	include "random.asm"
 	include "monitor.asm"
+	ifdef AUTOSTART
+	include "../programs/snake.asm"
+	endif
 
 * ---- initialisation data ----
 * (address, value) pairs

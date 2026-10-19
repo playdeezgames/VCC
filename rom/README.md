@@ -181,6 +181,17 @@ loads it; start it with `B` at the prompt:
   and `tone`, writes screen codes (semigraphics blocks) straight to `$0400`,
   keeps its state at `$0F00` and the body queue at `$1000`.
 
+### A ROM that boots into a program
+
+`rom/snakerom.asm` defines `AUTOSTART` and includes `boot.asm`, which then
+includes `programs/snake.asm` into the ROM and calls its `start` instead of
+printing the banner. BREAK ends the game and drops into the monitor as usual:
+
+```
+./asm6809 rom/snakerom.asm -o rom/snake.rom
+./vcc --rom rom/snake.rom
+```
+
 ## Hardware notes and assumptions
 
 * GIME `INIT0` = `$84`: CoCo 1/2 compatible video, MMU off, vectors in ROM,

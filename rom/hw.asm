@@ -14,6 +14,7 @@
 *   $C000-$FEFF  cartridge ROM space
 *   $FF00-$FFFF  I/O and interrupt vectors
 
+HW_INCLUDED	equ 1		; (lets programs include this file only once)
 STACK_TOP	equ $03FF
 SCREEN		equ $0400
 SCREEN_END	equ $0600

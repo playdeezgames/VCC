@@ -1164,3 +1164,22 @@ snake_game_plays :: proc(t: ^testing.T) {
 	settle(m, 10)
 	expect_row(t, m, ">")
 }
+
+@(test)
+snake_rom_boots_into_the_game :: proc(t: ^testing.T) {
+	m := asm_rom_machine(t, "rom/snakerom.asm")
+	if m == nil {return}
+	defer test_machine_free(m)
+	for _ in 0 ..< 30 {machine_run_frame(m)}
+	expect_row(t, m, "           S N A K E") // straight into the title screen
+	tap_key(m, .SPACE)
+	settle(m, 2)
+	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 000")
+	testing.expect_value(t, screen_code(m, 1, 0), 0xCF)
+	// BREAK leaves the game; the monitor is still there
+	tap_key(m, .ESCAPE)
+	settle(m, 10)
+	testing.expect_value(t, screen_row(m, 0), "COCO 3 OPEN ROM V0.1")
+	type_text(m, "F 0900 0900 5A\n")
+	testing.expect_value(t, mem_read8(m, 0x0900), 0x5A)
+}
