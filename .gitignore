@@ -41,3 +41,4 @@ __bin
 *.dsk
 /MC6809E*.pdf
 /odin.bin
+/asm6809
