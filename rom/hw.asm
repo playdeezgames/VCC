@@ -131,6 +131,24 @@ dsktmp		equ $5E		; fdb: scratch of the disk driver
 kbt1		equ $60		; scratch of the IRQ handler (never shared with foreground code)
 kbt2		equ $61
 kbt3		equ $62
+joytmp		equ $63		; fcb: joystick result
+tapedly		equ $64		; fcb: delay loops per step of the cycle being written
+tapecnt		equ $65		; fcb: bit counter
+tapesum		equ $66		; fcb: running checksum
+tapebyte	equ $67		; fcb: byte being assembled
+tapetype	equ $68		; fcb: block type
+tapelen		equ $69		; fcb: block length being processed
+tapeblen	equ $6A		; fcb: block length (kept for the caller)
+tapechunk	equ $6B		; fcb
+tapeouter	equ $6C		; fcb: outer count of the signal wait
+tapetmp		equ $6D		; fcb
+tapeverbose	equ $6E		; fcb: non-zero: tape_load prints FOUND for each file header
+tapedst		equ $6F		; fdb: where block data goes (0 = discard)
+tapeleft	equ $71		; fdb: bytes left to write
+tapenm		equ $73		; fdb: name to look for
+tapeovr		equ $75		; fdb: load address override
+TAPEHDR		equ $0130	; 15 byte file header record: name[8] kind load count entry
+TAPENAME	equ $0140	; 8 byte file name typed at the prompt
 
 KBBUF		equ $0120	; 16 byte key ring buffer
 LINEBUF		equ $0200	; input line, LINEMAX characters plus a terminator

@@ -47,7 +47,8 @@ Work that was deliberately left out so far. Roughly in priority order within eac
     BIAND/BIEOR/BIOR/BOR, LDBT, STBT): decide whether to implement them properly or match VCC.
   - Tests: reuse the 6809 test rig (`cpu6809_test.odin`) for emulation-mode compatibility, then per-opcode
     known-answer tests in native mode.
-- Cassette in/out (CLOAD/CSAVE, WAV and .CAS), `Cassette.cpp`.
+- Cassette: WAV in/out is done (`cassette.odin`, `--tape`, `--tape-out`). Still open: .CAS files (byte stream
+  <-> FSK conversion as in `Cassette.cpp`), tape counter/stop/rewind/pause controls, fast-load, CA1 carrier detect.
 - Joystick hardware (SDL game controllers) and the hi-res joystick ramp modes.
 - Config file (ROM paths, monitor type, key layout, last-used disks) and a key-map editor.
 - Alternate key layouts (positional "CoCo", compact).

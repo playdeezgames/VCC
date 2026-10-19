@@ -59,7 +59,7 @@ boot_machine :: proc(t: ^testing.T) -> ^Machine {
 
 // Assemble `body` at $0600, run it on the booted machine until it reaches its
 // "halt" label. The program calls ROM routines through the jump table.
-run_ram_program :: proc(t: ^testing.T, m: ^Machine, body: string, timed := false) -> bool {
+run_ram_program :: proc(t: ^testing.T, m: ^Machine, body: string, timed := false, max_frames := 600) -> bool {
 	res := asm6809.assemble_text("ram.asm", body)
 	defer asm6809.destroy(&res)
 	if len(res.errors) > 0 {
@@ -74,7 +74,7 @@ run_ram_program :: proc(t: ^testing.T, m: ^Machine, body: string, timed := false
 	m.cpu.pc = 0x0600
 	if timed {
 		// whole frames, so the scanline events (disk controller, interrupts) run
-		for _ in 0 ..< 600 {
+		for _ in 0 ..< max_frames {
 			machine_run_frame(m)
 			if int(m.cpu.pc) == halt {return true}
 		}
@@ -602,4 +602,332 @@ monitor_sound_command :: proc(t: ^testing.T) {
 	crossings := audio_crossings(m)
 	testing.expectf(t, crossings >= 30 && crossings <= 50, "S with arguments: %d crossings", crossings)
 	expect_row(t, m, ">")
+}
+
+// ---------------------------------------------------------------- joystick
+
+@(test)
+joystick_axes_and_buttons :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	machine_set_axis(m, .Right_X, 0x2000) // centre
+	machine_set_axis(m, .Right_Y, STICK_MAX)
+	machine_set_axis(m, .Left_X, 0x1000)
+	// Left_Y left at 0: no stick
+	machine_set_button(m, BUTTON_LEFT_1 | BUTTON_RIGHT_2, true)
+	ok := run_ram_program(t, m, `
+	org $0600
+	lda #0
+	jsr $8027
+	sta $0A00
+	lda #1
+	jsr $8027
+	sta $0A01
+	lda #2
+	jsr $8027
+	sta $0A02
+	lda #3
+	jsr $8027
+	sta $0A03
+	jsr $802A
+	sta $0A04
+halt	bra halt
+`)
+	if !ok {return}
+	testing.expect_value(t, mem_read8(m, 0x0A00), 32)
+	testing.expect_value(t, mem_read8(m, 0x0A01), 63)
+	testing.expect_value(t, mem_read8(m, 0x0A02), 16)
+	testing.expect_value(t, mem_read8(m, 0x0A03), 0)
+	testing.expect_value(t, mem_read8(m, 0x0A04), 0x06) // left 1 and right 2
+	// the multiplexer is back on the sound source and the DAC is quiet
+	testing.expect_value(t, get_mux_state(m), 0)
+	testing.expect_value(t, m.pia1.reg[0] & 0xFC, 0)
+	testing.expect_value(t, m.pia0.reg[3] & 0x3F, 0x35) // vertical sync IRQ still enabled
+}
+
+@(test)
+monitor_joystick_command :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	machine_set_axis(m, .Right_X, 0x2000)
+	machine_set_axis(m, .Right_Y, 0x3FFF)
+	machine_set_axis(m, .Left_X, 0x0400)
+	// (a pressed button reads as a key in the keyboard matrix, so none is held while typing)
+	type_text(m, "J\n")
+	expect_row(t, m, "RX=20 RY=3F LX=04 LY=00")
+	expect_row(t, m, "BUTTONS=00")
+}
+
+// ---------------------------------------------------------------- tape
+
+TAPE_PROGRAM_SAVE :: `
+	org $0600
+	ldx #$0800		; 300 bytes of pattern: i*7+3
+	ldy #300
+	ldb #3
+fill	stb ,x+
+	addb #7
+	leay -1,y
+	bne fill
+	ldx #hdr
+	jsr $802D		; tape_save
+	bcc saved
+	sta $0A00
+	bra halt
+saved	clr $0A00
+halt	bra halt
+hdr	fcb "TESTFILE",'M'
+	fdb $0800,300,$0810
+`
+
+@(test)
+tape_wav_codec :: proc(t: ^testing.T) {
+	samples := []u8{128, 200, 50, 128, 255, 0}
+	file := wav_encode(samples, 22050)
+	defer delete(file)
+	got, rate, ok := wav_decode(file)
+	defer delete(got)
+	testing.expect(t, ok)
+	testing.expect_value(t, rate, 22050)
+	testing.expect_value(t, len(got), 6)
+	for s, i in samples {testing.expect_value(t, got[i], s)}
+
+	// 16 bit stereo: the first channel, scaled to 8 bits
+	d := make([]u8, 44 + 8, context.temp_allocator)
+	copy(d, file[:44])
+	d[22] = 2 // channels
+	d[34] = 16 // bits
+	d[40] = 8 // data size
+	d[44], d[45] = 0x00, 0x40 // +16384 -> 192
+	d[48], d[49] = 0x00, 0xC0 // -16384 -> 64
+	got2, _, ok2 := wav_decode(d)
+	defer delete(got2)
+	testing.expect(t, ok2)
+	testing.expect_value(t, len(got2), 2)
+	testing.expect_value(t, got2[0], 192)
+	testing.expect_value(t, got2[1], 64)
+
+	_, _, bad := wav_decode([]u8{1, 2, 3})
+	testing.expect(t, !bad)
+}
+
+@(test)
+tape_save_writes_fsk_wav :: proc(t: ^testing.T) {
+	path := join2(DISK_DIR, "rom_tape_a.wav")
+	defer os.remove(path)
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	tape_record_to(m, path)
+	if !run_ram_program(t, m, TAPE_PROGRAM_SAVE, timed = true) {return}
+	testing.expect_value(t, mem_read8(m, 0x0A00), 0)
+	data, err := os.read_entire_file(path, context.allocator)
+	if err != nil {
+		testing.expect(t, false, "no WAV file was written")
+		return
+	}
+	defer delete(data)
+	samples, rate, ok := wav_decode(data)
+	defer delete(samples)
+	testing.expect(t, ok)
+	testing.expect_value(t, rate, 44100)
+	// measure the cycles: rising crossings of the middle
+	ones, zeros, other := 0, 0, 0
+	last := -1
+	prev_high := false
+	for s, i in samples {
+		high := s >= 128
+		if high && !prev_high {
+			if last >= 0 {
+				p := i - last
+				switch {
+				case p >= 33 && p <= 42: ones += 1
+				case p >= 15 && p <= 24: zeros += 1
+				case: other += 1
+				}
+			}
+			last = i
+		}
+		prev_high = high
+	}
+	testing.expect(t, ones > 1000 && zeros > 1000, "both tones are present")
+	testing.expect(t, other < 10, "every cycle is a clean 1200 or 2400 Hz one")
+}
+
+// A tape made by the ROM's own tape_save, as a file for the tests that read it.
+make_tape :: proc(t: ^testing.T, path: string) -> bool {
+	m := boot_machine(t)
+	if m == nil {return false}
+	defer test_machine_free(m)
+	tape_record_to(m, path)
+	return run_ram_program(t, m, TAPE_PROGRAM_SAVE, timed = true)
+}
+
+@(test)
+tape_save_then_load_roundtrip :: proc(t: ^testing.T) {
+	path := join2(DISK_DIR, "rom_tape_b.wav")
+	defer os.remove(path)
+	if !make_tape(t, path) {return}
+
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	testing.expect(t, tape_play(m, path))
+	ok := run_ram_program(t, m, `
+	org $0600
+	ldx #$0800		; clear the destination
+clr	clr ,x+
+	cmpx #$0A00
+	bne clr
+	ldx #name
+	ldy #0
+	jsr $8030		; tape_load
+	bcc loaded
+	sta $0A00
+	bra halt
+loaded	clr $0A00
+halt	bra halt
+name	fcb "TESTFILE"
+`, timed = true)
+	if !ok {return}
+	testing.expect_value(t, mem_read8(m, 0x0A00), 0)
+	for i in 0 ..< 300 {
+		want := u8(i * 7 + 3)
+		if mem_read8(m, u16(0x0800 + i)) != want {
+			testing.expectf(t, false, "byte %d is $%02X, want $%02X", i, mem_read8(m, u16(0x0800 + i)), want)
+			break
+		}
+	}
+	testing.expect_value(t, mem_read8(m, 0x0800 + 300), 0) // nothing beyond the file
+	// the header was left behind
+	testing.expect_value(t, mem_read8(m, TAPEHDR_ADDR + 0), 'T')
+	testing.expect_value(t, mem_read8(m, TAPEHDR_ADDR + 8), 'M')
+	testing.expect_value(t, int(mem_read8(m, TAPEHDR_ADDR + 11)) << 8 | int(mem_read8(m, TAPEHDR_ADDR + 12)), 300)
+	testing.expect_value(t, int(mem_read8(m, TAPEHDR_ADDR + 13)) << 8 | int(mem_read8(m, TAPEHDR_ADDR + 14)), 0x0810)
+	testing.expect(t, !m.cass_motor, "the motor is off again")
+}
+
+TAPEHDR_ADDR :: 0x0130
+
+@(test)
+tape_load_override_address_and_errors :: proc(t: ^testing.T) {
+	path := join2(DISK_DIR, "rom_tape_c.wav")
+	defer os.remove(path)
+	if !make_tape(t, path) {return}
+
+	// load at another address, any name
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	testing.expect(t, tape_play(m, path))
+	ok := run_ram_program(t, m, `
+	org $0600
+	ldx #name
+	ldy #$1000
+	jsr $8030
+	bcc loaded
+	sta $0A00
+	bra halt
+loaded	clr $0A00
+halt	bra halt
+name	fcb 0,0,0,0,0,0,0,0
+`, timed = true)
+	if !ok {return}
+	testing.expect_value(t, mem_read8(m, 0x0A00), 0)
+	testing.expect_value(t, mem_read8(m, 0x1000), 3)
+	testing.expect_value(t, mem_read8(m, 0x1000 + 299), u8((299 * 7 + 3) & 255))
+
+	// a name that is not on the tape: the file is skipped, then the tape runs out
+	testing.expect(t, tape_play(m, path))
+	ok = run_ram_program(t, m, `
+	org $0600
+	ldx #name
+	ldy #0
+	jsr $8030
+	bcc found
+	sta $0A00
+	bra halt
+found	lda #$EE
+	sta $0A00
+halt	bra halt
+name	fcb "NOSUCH  "
+`, timed = true, max_frames = 1500)
+	if !ok {return}
+	testing.expect_value(t, mem_read8(m, 0x0A00), 1) // TE_NOSIGNAL
+
+	// no tape at all and BREAK held: the wait is abandoned
+	tape_eject(m)
+	machine_key_event(m, .ESCAPE, true)
+	for _ in 0 ..< 5 {machine_run_frame(m)}
+	ok = run_ram_program(t, m, `
+	org $0600
+	ldx #name
+	ldy #0
+	jsr $8030
+	sta $0A00
+halt	bra halt
+name	fcb 0,0,0,0,0,0,0,0
+`, timed = true)
+	machine_key_event(m, .ESCAPE, false)
+	if !ok {return}
+	testing.expect_value(t, mem_read8(m, 0x0A00), 4) // TE_BREAK
+}
+
+@(test)
+monitor_tape_commands :: proc(t: ^testing.T) {
+	path := join2(DISK_DIR, "rom_tape_d.wav")
+	defer os.remove(path)
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	tape_record_to(m, path)
+	type_text(m, "F 0800 08FF 5A\nO HELLO 0800 100 0840\n")
+	settle(m, 400)
+	expect_row(t, m, "SAVED")
+	// rewind (play what was recorded) and read it back to another place
+	testing.expect(t, tape_play(m, path))
+	type_text(m, "I HELLO 1000\n")
+	settle(m, 400)
+	expect_row(t, m, "FOUND HELLO")
+	expect_row(t, m, "LOAD 1000 LEN 0100 ENTRY 0840")
+	testing.expect_value(t, mem_read8(m, 0x1000), 0x5A)
+	testing.expect_value(t, mem_read8(m, 0x10FF), 0x5A)
+	testing.expect(t, mem_read8(m, 0x1100) != 0x5A, "nothing beyond the file")
+	// the monitor takes commands again
+	type_text(m, "T\n")
+	expect_screen_contains(t, m, "TICKS")
+}
+
+// The real Color BASIC as a foreign tape writer and reader (skipped without coco3.rom):
+// proves the emulated cassette timing is right, independently of the ROM in rom/.
+@(test)
+real_basic_csave_then_cload :: proc(t: ^testing.T) {
+	path := join2(DISK_DIR, "real_tape.wav")
+	defer os.remove(path)
+	{
+		m := real_rom_machine()
+		if m == nil {return}
+		defer test_machine_free(m)
+		for _ in 0 ..< 200 {machine_run_frame(m)}
+		tape_record_to(m, path)
+		type_basic(m, "10 PRINT \"FROM TAPE\"\nCSAVE \"T\"\n", 900)
+		for _ in 0 ..< 900 {machine_run_frame(m)}
+		testing.expect(t, !m.cass_motor, "CSAVE finished")
+		expect_screen_contains(t, m, "OK")
+	}
+	if _, err := os.stat(path, context.temp_allocator); err != nil {
+		testing.expect(t, false, "CSAVE wrote no tape")
+		return
+	}
+	m := real_rom_machine()
+	if m == nil {return}
+	defer test_machine_free(m)
+	for _ in 0 ..< 200 {machine_run_frame(m)}
+	testing.expect(t, tape_play(m, path))
+	type_basic(m, "CLOAD \"T\"\n", 900)
+	for _ in 0 ..< 600 {machine_run_frame(m)}
+	type_basic(m, "LIST\n", 100)
+	expect_screen_contains(t, m, "10 PRINT \"FROM TAPE\"")
 }

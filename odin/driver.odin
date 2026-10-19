@@ -19,6 +19,7 @@ CYCLES_PER_LINE :: CYCLES_PER_SECOND / LINES_PER_SECOND
 
 Timing :: struct {
 	cycle_drift:         f64,
+	elapsed_ns:          f64, // emulated time since start (not reset by machine reset)
 	nanos_this_line:     f64,
 
 	// GIME timer. clock rate 0 = one scanline per tick, 1 = one colorburst tick.
@@ -134,6 +135,8 @@ cpu_cycle :: proc(m: ^Machine, nanos: f64) {
 		if step < 0 {step = 0}
 
 		run_cpu_ns(m, step)
+		t.elapsed_ns += step
+		m.cpu.cycles = 0 // outside a slice (see emu_now_ns)
 		t.nanos_this_line -= step
 		t.nanos_to_interrupt -= step
 		t.nanos_to_snd -= step

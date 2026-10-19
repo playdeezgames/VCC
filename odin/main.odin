@@ -24,6 +24,8 @@ main :: proc() {
 	paste_keys := false // type via the keyboard matrix instead of the ROM hook
 	disk_paths: [4]string
 	new_disk := ""
+	tape_in := ""
+	tape_out := ""
 	args := os.args[1:]
 	for i := 0; i < len(args); i += 1 {
 		switch args[i] {
@@ -76,13 +78,19 @@ main :: proc() {
 			n := int(args[i][6] - '0')
 			i += 1
 			if i < len(args) {disk_paths[n] = args[i]}
+		case "--tape":
+			i += 1
+			if i < len(args) {tape_in = args[i]}
+		case "--tape-out":
+			i += 1
+			if i < len(args) {tape_out = args[i]}
 		case "--new-disk":
 			i += 1
 			if i < len(args) {new_disk = args[i]}
 		}
 	}
 	if rom_path == "" {
-		fmt.eprintln("usage: vcc --rom <coco3.rom> [--cart <disk11.rom>] [--disk0..--disk3 <image.dsk>] [--new-disk <file.dsk>] [--mute] [--dump-frame N [--text-dump]]")
+		fmt.eprintln("usage: vcc --rom <coco3.rom> [--cart <disk11.rom>] [--disk0..--disk3 <image.dsk>] [--new-disk <file.dsk>] [--tape <in.wav>] [--tape-out <out.wav>] [--mute] [--dump-frame N [--text-dump]]")
 		os.exit(2)
 	}
 	rom, rerr := os.read_entire_file(rom_path, context.allocator)
@@ -113,6 +121,11 @@ main :: proc() {
 		}
 		disk_paths[0] = new_disk
 	}
+	if tape_in != "" && !tape_play(m, tape_in) {
+		fmt.eprintfln("cannot load tape %q (need a PCM WAV file)", tape_in)
+		os.exit(1)
+	}
+	if tape_out != "" {tape_record_to(m, tape_out)}
 	for path, drive in disk_paths {
 		if path == "" {continue}
 		if err := fdc_mount(m, drive, path); err != .None {
@@ -205,7 +218,10 @@ main :: proc() {
 				// Drop a disk image on the window: drive 0, or drive 1 with Shift held.
 				drive := 1 if SDL.GetModState() & SDL.KMOD_SHIFT != {} else 0
 				path := string(e.drop.file)
-				if err := fdc_mount(m, drive, path); err != .None {
+				if strings.has_suffix(strings.to_lower(path, context.temp_allocator), ".wav") {
+					// a tape: play from the start when the motor runs
+					if !tape_play(m, path) {fmt.eprintfln("cannot load tape %q", path)}
+				} else if err := fdc_mount(m, drive, path); err != .None {
 					fmt.eprintfln("cannot mount %q: %s", path, disk.error_text(err))
 				}
 				SDL.free(rawptr(e.drop.file))

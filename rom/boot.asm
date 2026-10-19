@@ -25,6 +25,10 @@ api_disk_read	jmp disk_read		; $801B
 api_disk_write	jmp disk_write		; $801E
 api_beep		jmp beep		; $8021
 api_tone		jmp tone		; $8024
+api_joy_axis	jmp joy_axis		; $8027
+api_joy_buttons	jmp joy_buttons		; $802A
+api_tape_save	jmp tape_save		; $802D
+api_tape_load	jmp tape_load		; $8030
 
 	setdp 0
 
@@ -112,6 +116,8 @@ write_table	ldy ,x++
 	include "keyboard.asm"
 	include "disk.asm"
 	include "sound.asm"
+	include "joystick.asm"
+	include "tape.asm"
 	include "monitor.asm"
 
 * ---- initialisation data ----

@@ -10,6 +10,10 @@
 *                      sector 1 (see below)
 *   G addr             call addr; RTS or SWI returns to the monitor
 *   S [loops periods]  sound: a tone (see sound.asm); plain S beeps
+*   O name start len [entry]  write memory to tape (a file with that name)
+*   I [name [addr]]    read a file from tape ('*' or no name: the first one;
+*                      addr overrides the load address). BREAK stops the wait
+*   J                  show the joystick axes (0-3F) and buttons
 *   R                  show the registers saved when G came back or SWI hit
 *   T                  show the tick counter
 *   H or ?             help
@@ -60,6 +64,12 @@ commands	fcb 'D'
 	fdb cmd_b
 	fcb 'S'
 	fdb cmd_s
+	fcb 'J'
+	fdb cmd_j
+	fcb 'O'
+	fdb cmd_o
+	fcb 'I'
+	fdb cmd_i
 	fcb 'R'
 	fdb cmd_r
 	fcb 'T'
@@ -368,6 +378,9 @@ help	fcb "D [ADDR [LEN]]  DUMP",13
 	fcb "B [DRV]   BOOT FROM DISK",13
 	fcb "G ADDR   CALL (RTS/SWI BACK)",13
 	fcb "R REGISTERS  T TICKS  S BEEP",13
+	fcb "J JOYSTICKS",13
+	fcb "O NAME ADDR LEN [ENTRY] TAPE",13
+	fcb "I [NAME [ADDR]]  LOAD TAPE",13
 	fcb "NUMBERS ARE HEX",13,0
 
 cmd_s	lbsr parsehex
@@ -379,6 +392,144 @@ cmd_s	lbsr parsehex
 	tfr d,y			; periods
 	tfr u,x
 	jmp tone
+
+cmd_j	ldx #msg_rx
+	jsr puts
+	lda #0
+	jsr joy_axis
+	jsr puthex8
+	ldx #msg_ry
+	jsr puts
+	lda #1
+	jsr joy_axis
+	jsr puthex8
+	ldx #msg_lx
+	jsr puts
+	lda #2
+	jsr joy_axis
+	jsr puthex8
+	ldx #msg_ly
+	jsr puts
+	lda #3
+	jsr joy_axis
+	jsr puthex8
+	jsr newline
+	ldx #msg_btn
+	jsr puts
+	jsr joy_buttons
+	jsr puthex8
+	jsr newline
+	rts
+msg_rx	fcb "RX=",0
+msg_ry	fcb " RY=",0
+msg_lx	fcb " LX=",0
+msg_ly	fcb " LY=",0
+msg_btn	fcb "BUTTONS=",0
+
+* ---- tape commands ----
+* File name from the line into the 8 byte field at U (upper case, space
+* padded). Carry set if there was one.
+parse_name	lbsr skipsp
+	ldx lineptr
+	lda ,x
+	beq .none
+	ldb #8
+.copy	lda ,x
+	beq .pad
+	cmpa #$20
+	beq .pad
+	jsr upcase
+	sta ,u+
+	leax 1,x
+	decb
+	bne .copy
+.rest	lda ,x			; skip the rest of a long name
+	beq .done
+	cmpa #$20
+	beq .done
+	leax 1,x
+	bra .rest
+.pad	lda #$20
+.fill	tstb
+	beq .done
+	sta ,u+
+	decb
+	bra .fill
+.done	stx lineptr
+	orcc #1
+	rts
+.none	andcc #$FE
+	rts
+
+cmd_o	ldu #TAPEHDR
+	lbsr parse_name
+	lbcc cmd_error
+	lbsr parsehex
+	lbcc cmd_error
+	std TAPEHDR+9		; load address
+	lbsr parsehex
+	lbcc cmd_error
+	std TAPEHDR+11		; byte count
+	lbsr parsehex
+	bcs .entry
+	ldd TAPEHDR+9		; default entry: the load address
+.entry	std TAPEHDR+13
+	lda #'M'
+	sta TAPEHDR+8
+	ldx #TAPEHDR
+	jsr tape_save
+	bcs tape_report
+	ldx #msg_saved
+	jsr puts
+	rts
+msg_saved	fcb "SAVED",13,0
+
+tape_report	pshs a
+	ldx #msg_tapeerr
+	jsr puts
+	puls a
+	jsr puthex8
+	jsr newline
+	rts
+msg_tapeerr	fcb "TAPE ERROR ",0
+
+cmd_i	ldu #TAPENAME
+	lbsr parse_name
+	bcs .named
+	clr TAPENAME		; no name: any file
+.named	lda TAPENAME
+	cmpa #'*'
+	bne .addr
+	clr TAPENAME
+.addr	lbsr parsehex
+	bcs .have
+	ldd #0
+.have	std argadr
+	lda #1
+	sta tapeverbose
+	ldx #TAPENAME
+	ldy argadr
+	jsr tape_load
+	bcs tape_report
+	ldx #msg_load
+	jsr puts
+	ldd argadr
+	bne .shown
+	ldd TAPEHDR+9
+.shown	jsr puthex16
+	ldx #msg_len
+	jsr puts
+	ldd TAPEHDR+11
+	jsr puthex16
+	ldx #msg_entry
+	jsr puts
+	ldd TAPEHDR+13
+	jsr puthex16
+	jsr newline
+	rts
+msg_load	fcb "LOAD ",0
+msg_len	fcb " LEN ",0
+msg_entry	fcb " ENTRY ",0
 
 * ---- disk commands ----
 cmd_l	clr argop

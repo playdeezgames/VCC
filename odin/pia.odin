@@ -101,6 +101,7 @@ pia1_read :: proc(m: ^Machine, port_in: u8) -> u8 {
 		if dda {
 			p.reg[1] &= 63 // clears the CD flag (cassette in)
 			cpu_deassert_interrupt(&m.cpu, .PIA1_CD, .FIRQ)
+			if p.dd[0] & 1 == 0 {return p.reg[0] & 0xFE | tape_level(m)} // bit 0 is the tape input
 			return p.reg[0]
 		}
 		return p.dd[0]
@@ -122,6 +123,7 @@ pia1_write :: proc(m: ^Machine, port_in: u8, data: u8) {
 					m.asample = (p.reg[0] & 0xFC) >> 1 // 6 bit DAC, 0..127
 				} else {
 					m.csample = p.reg[0] & 0xFC // cassette write
+					tape_note_output(m)
 				}
 			}
 		} else {
@@ -136,7 +138,7 @@ pia1_write :: proc(m: ^Machine, port_in: u8, data: u8) {
 		}
 	case 1:
 		p.reg[1] = p.reg[1] & 0xC0 | data & 0x3F
-		m.cass_motor = data & 8 != 0
+		tape_motor(m, data & 8 != 0)
 	case 3:
 		p.reg[3] = p.reg[3] & 0xC0 | data & 0x3F
 	}

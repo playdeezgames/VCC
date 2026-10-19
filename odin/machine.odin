@@ -69,6 +69,7 @@ Machine :: struct {
 
 	timing:          Timing,
 	fdc:             Fdc,
+	tape:            Tape,
 
 	// video
 	fb:              []u32, // FB_W x FB_H ARGB framebuffer (nil = don't render)
@@ -104,6 +105,7 @@ machine_load_cart :: proc(m: ^Machine, data: []u8) {
 
 machine_destroy :: proc(m: ^Machine) {
 	fdc_shutdown(m)
+	tape_close(m)
 	delete(m.ram)
 	m.ram = nil
 	delete(m.audio_samples)

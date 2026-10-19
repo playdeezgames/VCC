@@ -8,8 +8,8 @@ taken from `coco3.rom` or `disk11.rom`; they are never disassembled for this
 project. License: GPLv3 like the rest of the repository.
 
 It is a monitor, not BASIC: it initialises the machine, runs a text console,
-reads the keyboard, loads and runs programs from a floppy disk and makes
-sound. `coco3.rom` keeps working exactly as before (`--rom` takes any 32K image).
+reads the keyboard, loads and runs programs from a floppy disk or cassette,
+reads the joysticks and makes sound. `coco3.rom` keeps working exactly as before (`--rom` takes any 32K image).
 
 ## Build and run
 
@@ -84,6 +84,14 @@ A fixed jump table starts at `$8000`; call these with `JSR`. DP must be 0.
 | `$801E` | disk_write | same | writes the 256 bytes at X |
 | `$8021` | beep | | about 1 kHz for 0.1 s |
 | `$8024` | tone | X = loops per half period, Y = periods | masks interrupts while it runs; all registers kept |
+| `$8027` | joy_axis | A = axis (0 right X, 1 right Y, 2 left X, 3 left Y) | A = position 0-63 (centre about 32; a stick that is not there reads 0). Masks interrupts briefly |
+| `$802A` | joy_buttons | | A = pressed buttons: bit 0 right 1, bit 1 left 1, bit 2 right 2, bit 3 left 2 |
+| `$802D` | tape_save | X -> 15 byte header record | writes the header and `count` bytes from `load`; carry set + A = error on failure |
+| `$8030` | tape_load | X -> 8 byte name (first byte 0: any), Y = load address (0: the file's) | loads the file, leaves its header at `$0130`; carry set + A = error |
+
+Tape error codes: 1 no signal (or the tape ended), 2 checksum, 4 BREAK pressed
+while waiting. Tape routines mask interrupts while they run and switch the
+motor on only for that time.
 
 Disk error codes: 1 timeout, 2 sector not found (no disk, bad sector, no
 controller), 3 CRC, 4 lost data, 5 write protected, 6 write fault, 7 bad drive.
@@ -114,6 +122,9 @@ and digits may be upper or lower case.
 | `W drv trk sec adr [n]` | write sectors from memory |
 | `B [drv]` | boot (below) |
 | `S [loops periods]` | sound; plain `S` beeps |
+| `J` | joystick axes (0-3F) and buttons |
+| `O name start len [entry]` | write memory to tape as file `name` (8 characters) |
+| `I [name [addr]]` | read a file from tape (`*` or no name: the first one; `addr` overrides the load address). Prints `FOUND name` for every file it sees and `LOAD .. LEN .. ENTRY ..` at the end. BREAK abandons the wait |
 | `H` or `?` | help |
 
 An error prints `?` (bad command or arguments) or `DISK ERROR nn`.
@@ -132,6 +143,22 @@ Track 0, sector 1 (single sided, 256 byte sectors):
 `B` loads the sectors and calls the entry address with `JSR`; an `RTS` returns
 to the prompt. A disk without the signature prints `NO BOOT`.
 
+### Tape format
+
+FSK at roughly 1200 Hz (a 1 bit) and 2400 Hz (a 0 bit), one cycle per bit,
+eight stepped sine values per cycle through the DAC; bytes are sent least
+significant bit first. A block is: leader of `$55` bytes (128 before the first
+block, 8 before the others), `$3C`, type, length, data, checksum (sum of type,
+length and data, modulo 256), `$55`. Type 0 is the file header (name[8], kind
+`'M'`, load address, byte count, entry address; 15 bytes), type 1 holds up to 255
+data bytes, type `$FF` ends the file. The reader measures every cycle against a
+threshold half way between the two tones, so it tolerates tape speed changes.
+The block layout follows the platform's usual cassette convention (leader, sync,
+type, length, checksum), but interchange with BASIC's own files has not been
+tried: the header fields here are this ROM's own. What the test suite does
+check is the emulated cassette itself, with the real Color BASIC's `CSAVE` and
+`CLOAD` (when `coco3.rom` is present), and a save/load round trip of this ROM.
+
 ## Hardware notes and assumptions
 
 * GIME `INIT0` = `$84`: CoCo 1/2 compatible video, MMU off, vectors in ROM,
@@ -148,10 +175,19 @@ to the prompt. A disk without the signature prints `NO BOOT`.
   transfers run with interrupts masked and poll DRQ/BUSY.
 * The emulated FD-502 ends a sector read/write with the last data byte, like
   the real WD1793. Not yet verified on real hardware.
+* Joystick: the stick's position is found by successive approximation on the
+  DAC (6 comparisons), with the analog multiplexer set through the CA2 and CB2
+  bits of PIA0 and put back to the sound source afterwards. A pressed button
+  also shows up as a pressed key in the matrix (row 0-3, every column), exactly
+  as on the real machine, so do not hold one while typing.
+* Tape: the DAC drives the cassette output while the multiplexer is on the
+  sound source and the sound enable (CB2 of PIA1) is low; the motor is PIA1 CA2.
+  Real tape recorders need level adjustment; the write levels swing about `$80`
+  by +-`$2C`, which is what the emulator's WAV output uses.
 * No RAM sizing is done; the ROM assumes at least 64K behind the CPU's low
   32K, and uses only the bottom 2K of it.
 
 ## Not done yet
 
-BASIC, tape I/O, joysticks, 40/80 column and graphics helpers, RAM sizing and
+BASIC (out of scope), .CAS files, 40/80 column and graphics helpers, RAM sizing and
 MMU paging helpers, a file system, interrupt-driven disk I/O.
