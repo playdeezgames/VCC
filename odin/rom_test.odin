@@ -114,7 +114,7 @@ boot_rom_shows_banner_and_prompt :: proc(t: ^testing.T) {
 	// boot state: IRQ on (vertical sync tick), FIRQ masked, SAM/GIME set up for the compat text screen
 	testing.expect(t, !flag(&m.cpu, .I) && flag(&m.cpu, .F))
 	testing.expect_value(t, m.sam_dis_offset, 2)
-	testing.expect_value(t, m.gime_regs[0x90], 0x80)
+	testing.expect_value(t, m.gime_regs[0x90], 0x84) // compat, standard SCS
 }
 
 @(test)
@@ -538,4 +538,68 @@ monitor_boot_from_disk :: proc(t: ^testing.T) {
 	type_text(m, "B 1\n")
 	settle(m)
 	expect_row(t, m, "DISK ERROR 02")
+}
+
+// ---------------------------------------------------------------- sound
+
+// Steps in the audio stream (a jump of at least 4000 between neighbouring
+// samples): a square wave makes two a period. The output filter removes DC only
+// slowly, so counting sign changes would miss short tones.
+audio_crossings :: proc(m: ^Machine) -> int {
+	n := 0
+	for i in 1 ..< len(m.audio_samples) {
+		if abs(int(m.audio_samples[i].x) - int(m.audio_samples[i - 1].x)) >= 4000 {n += 1}
+	}
+	return n
+}
+
+@(test)
+sound_beep_bell_and_tone :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	machine_enable_audio(m)
+	machine_run_frame(m)
+	clear(&m.audio_samples)
+	ok := run_ram_program(t, m, `
+	org $0600
+	ldx #$5678
+	ldy #$9ABC
+	ldb #$77
+	jsr $8021		; beep: 100 periods
+	lda #$07		; BEL through putc: another 100 periods
+	jsr $8006
+	ldx #20			; a short higher tone: 10 periods
+	ldy #10
+	jsr $8024
+halt	bra halt
+`, timed = true)
+	if !ok {return}
+	for _ in 0 ..< 4 {machine_run_frame(m)}
+	crossings := audio_crossings(m)
+	testing.expectf(t, crossings >= 400 && crossings <= 460, "square wave crossings: %d", crossings)
+	testing.expect_value(t, m.cpu.x, 20)
+	testing.expect_value(t, m.cpu.y, 10)
+	testing.expect_value(t, m.cpu.b, 0x77)
+	testing.expect_value(t, m.pia1.reg[3] & 0x3F, 0x34) // sound enable put back
+	testing.expect_value(t, m.asample, 0) // DAC left at zero
+	testing.expect(t, !flag(&m.cpu, .I), "the interrupt mask is restored")
+}
+
+@(test)
+monitor_sound_command :: proc(t: ^testing.T) {
+	m := boot_machine(t)
+	if m == nil {return}
+	defer test_machine_free(m)
+	machine_enable_audio(m)
+	clear(&m.audio_samples)
+	type_text(m, "S\n")
+	settle(m, 20)
+	testing.expect(t, audio_crossings(m) >= 150, "S makes the beep")
+	clear(&m.audio_samples)
+	type_text(m, "S 20 14\n") // 20 loops, 20 periods
+	settle(m, 20)
+	crossings := audio_crossings(m)
+	testing.expectf(t, crossings >= 30 && crossings <= 50, "S with arguments: %d crossings", crossings)
+	expect_row(t, m, ">")
 }

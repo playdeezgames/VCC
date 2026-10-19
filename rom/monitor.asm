@@ -9,6 +9,7 @@
 *   B [drv]            boot: load and run the program described by track 0
 *                      sector 1 (see below)
 *   G addr             call addr; RTS or SWI returns to the monitor
+*   S [loops periods]  sound: a tone (see sound.asm); plain S beeps
 *   R                  show the registers saved when G came back or SWI hit
 *   T                  show the tick counter
 *   H or ?             help
@@ -57,6 +58,8 @@ commands	fcb 'D'
 	fdb cmd_w
 	fcb 'B'
 	fdb cmd_b
+	fcb 'S'
+	fdb cmd_s
 	fcb 'R'
 	fdb cmd_r
 	fcb 'T'
@@ -364,8 +367,18 @@ help	fcb "D [ADDR [LEN]]  DUMP",13
 	fcb "L/W DRV TRK SEC ADR [N]",13
 	fcb "B [DRV]   BOOT FROM DISK",13
 	fcb "G ADDR   CALL (RTS/SWI BACK)",13
-	fcb "R   REGISTERS   T   TICKS",13
+	fcb "R REGISTERS  T TICKS  S BEEP",13
 	fcb "NUMBERS ARE HEX",13,0
+
+cmd_s	lbsr parsehex
+	bcs .tone
+	jmp beep
+.tone	tfr d,u			; loops
+	lbsr parsehex
+	lbcc cmd_error
+	tfr d,y			; periods
+	tfr u,x
+	jmp tone
 
 * ---- disk commands ----
 cmd_l	clr argop

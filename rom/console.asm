@@ -9,7 +9,7 @@
 * Public routines (all preserve every register unless noted):
 *   cls       clear the screen, cursor to the top left
 *   putc      A = ASCII character. CR: new line; BS ($08): back up and erase;
-*             FF ($0C): clear screen; other controls are ignored
+*             FF ($0C): clear screen; BEL ($07): beep; other controls are ignored
 *   puts      X -> zero terminated string; X returns past the terminator
 *   newline   same as putc of CR
 *   puthex8   A as two hex digits
@@ -115,6 +115,8 @@ putc	pshs d,x,y
 	beq .back
 	cmpa #$0C
 	beq .formfeed
+	cmpa #$07
+	beq .bell
 	cmpa #$20
 	blo .done		; other control characters do nothing
 	cmpa #$7F
@@ -136,6 +138,8 @@ putc	pshs d,x,y
 	stx cursor
 	lda #BLANK
 	sta ,x
+	bra .done
+.bell	lbsr beep
 	bra .done
 .formfeed	lbsr clear_screen
 .done	lbsr cur_show

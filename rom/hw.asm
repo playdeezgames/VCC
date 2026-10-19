@@ -51,7 +51,7 @@ FDC_SECTOR	equ $FF4A
 FDC_DATA	equ $FF4B
 
 * ---- GIME ----
-INIT0		equ $FF90
+INIT0		equ $FF90	; bit 7 CoCo mode, 6 MMU, 3 vector RAM, 2 standard SCS (disk), 1-0 ROM map
 INIT1		equ $FF91
 IRQENR		equ $FF92
 FIRQENR		equ $FF93

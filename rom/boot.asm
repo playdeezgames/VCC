@@ -23,6 +23,8 @@ api_getc	jmp getc		; $8015
 api_poll	jmp poll		; $8018
 api_disk_read	jmp disk_read		; $801B
 api_disk_write	jmp disk_write		; $801E
+api_beep		jmp beep		; $8021
+api_tone		jmp tone		; $8024
 
 	setdp 0
 
@@ -109,12 +111,13 @@ write_table	ldy ,x++
 	include "console.asm"
 	include "keyboard.asm"
 	include "disk.asm"
+	include "sound.asm"
 	include "monitor.asm"
 
 * ---- initialisation data ----
 * (address, value) pairs
 gime_init	fdb INIT0
-	fcb $80		; CoCo 1/2 compatible, MMU off, vectors in ROM, ROM map 0
+	fcb $84		; CoCo 1/2 compatible, MMU off, vectors in ROM, standard SCS (disk), ROM map 0
 	fdb INIT1
 	fcb $00		; task 0, slow timer clock
 	fdb IRQENR
