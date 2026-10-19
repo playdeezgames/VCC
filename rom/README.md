@@ -92,6 +92,7 @@ A fixed jump table starts at `$8000`; call these with `JSR`. DP must be 0.
 | `$8033` | rand | | D = next pseudo random value, 1-65535 (16 bit xorshift, full period; the same sequence for the same seed) |
 | `$8036` | rand_seed | D = state | 0 is replaced by a fixed non-zero value. The state starts at `$ACE1` and is also stirred with the tick counter on every key press, so programs that wait for the user get a different sequence each run |
 | `$8039` | rand_range | A = n | A = a value in 0..n-1 (n = 0 means 256); scaled from the high byte of `rand`. Preserves B |
+| `$803C` | locate | A = column 0-31, B = row 0-15 | moves the text cursor (out of range values are clamped); all registers kept |
 
 Tape error codes: 1 no signal (or the tape ended), 2 checksum, 4 BREAK pressed
 while waiting. Tape routines mask interrupts while they run and switch the
@@ -163,6 +164,22 @@ type, length, checksum), but interchange with BASIC's own files has not been
 tried: the header fields here are this ROM's own. What the test suite does
 check is the emulated cassette itself, with the real Color BASIC's `CSAVE` and
 `CLOAD` (when `coco3.rom` is present), and a save/load round trip of this ROM.
+
+## Programs
+
+`programs/` holds programs for the ROM, written against the jump table.
+`odin build odin/tools/mkboot -out:mkboot && ./mkboot programs/snake.asm programs/snake.dsk`
+(or `programs/build.sh`) assembles one and writes a disk whose boot sector
+loads it; start it with `B` at the prompt:
+
+```
+./vcc --rom rom/ourrom.rom --disk0 programs/snake.dsk
+```
+
+* `snake.asm`: Snake on the text screen (arrow keys or WASD, eat the red
+  blocks, BREAK quits). It uses `locate`, `puts`, `poll`, `getc`, `rand_range`
+  and `tone`, writes screen codes (semigraphics blocks) straight to `$0400`,
+  keeps its state at `$0F00` and the body queue at `$1000`.
 
 ## Hardware notes and assumptions
 

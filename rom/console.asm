@@ -11,6 +11,7 @@
 *   putc      A = ASCII character. CR: new line; BS ($08): back up and erase;
 *             FF ($0C): clear screen; BEL ($07): beep; other controls are ignored
 *   puts      X -> zero terminated string; X returns past the terminator
+*   locate    A = column, B = row: move the cursor
 *   newline   same as putc of CR
 *   puthex8   A as two hex digits
 *   puthex16  D as four hex digits
@@ -183,3 +184,25 @@ puthex16	pshs d
 	tfr b,a
 	bsr puthex8
 	puls d,pc
+
+* A = column (0-31), B = row (0-15): move the cursor there (clamped to the
+* screen). All registers kept.
+locate	pshs d,x
+	inc cblock
+	lbsr cur_hide
+	cmpb #ROWS-1
+	bls .rowok
+	ldb #ROWS-1
+.rowok	lda #COLS
+	mul			; D = row * 32
+	addd #SCREEN
+	tfr d,x
+	ldb ,s			; the column (A as pushed)
+	cmpb #COLS-1
+	bls .colok
+	ldb #COLS-1
+.colok	abx
+	stx cursor
+	lbsr cur_show
+	dec cblock
+	puls d,x,pc

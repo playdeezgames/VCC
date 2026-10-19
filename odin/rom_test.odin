@@ -1052,3 +1052,115 @@ monitor_random_command :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, rows, 101)
 }
+
+// ---------------------------------------------------------------- programs/snake.asm
+
+// Machine at the monitor prompt with programs/snake.asm on a boot disk in drive 0.
+snake_machine :: proc(t: ^testing.T) -> (m: ^Machine, path: string, syms: asm6809.Result) {
+	path = join2(DISK_DIR, "snake_test.dsk")
+	syms = asm6809.assemble_file("programs/snake.asm")
+	if len(syms.errors) > 0 {
+		testing.expectf(t, false, "%s", asm6809.format_errors(&syms, context.temp_allocator))
+		return
+	}
+	disk.create_blank(path, overwrite = true)
+	m = boot_machine(t)
+	if m == nil {return}
+	m.fdc.enabled = true
+	fdc_mount(m, 0, path)
+	load := syms.lo
+	size := syms.hi - syms.lo + 1
+	sectors := (size + 255) / 256
+	entry, _ := asm6809.symbol_value(&syms, "start")
+	boot: [256]u8
+	boot[0], boot[1] = 'O', 'B'
+	boot[2], boot[3] = u8(load >> 8), u8(load)
+	boot[4] = u8(sectors)
+	boot[5], boot[6] = u8(entry >> 8), u8(entry)
+	disk.write_sector(&m.fdc.drives[0], 0, 0, 1, boot[:])
+	for s in 0 ..< sectors {
+		buf: [256]u8
+		for i in 0 ..< 256 {
+			a := load + s * 256 + i
+			if a <= syms.hi {buf[i] = syms.mem[a]}
+		}
+		disk.write_sector(&m.fdc.drives[0], 0, 0, 2 + s, buf[:])
+	}
+	return
+}
+
+snake_word :: proc(m: ^Machine, addr: int) -> int {
+	return int(mem_read8(m, u16(addr))) << 8 | int(mem_read8(m, u16(addr + 1)))
+}
+
+// Run frames until the snake has moved; returns the new head address.
+snake_wait_move :: proc(m: ^Machine, head_var: int) -> int {
+	h := snake_word(m, head_var)
+	for _ in 0 ..< 40 {
+		machine_run_frame(m)
+		if n := snake_word(m, head_var); n != h {return n}
+	}
+	return h
+}
+
+@(test)
+snake_game_plays :: proc(t: ^testing.T) {
+	m, path, syms := snake_machine(t)
+	defer asm6809.destroy(&syms)
+	if m == nil {return}
+	defer disk_rom_free(m, path)
+	head_var, _ := asm6809.symbol_value(&syms, "head")
+	food_var, _ := asm6809.symbol_value(&syms, "food")
+	len_var, _ := asm6809.symbol_value(&syms, "len")
+
+	type_text(m, "B\n")
+	settle(m, 100)
+	expect_row(t, m, "           S N A K E") // the title screen
+	tap_key(m, .SPACE)
+	settle(m, 1)
+	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 000")
+	testing.expect_value(t, screen_code(m, 1, 0), 0xCF) // walls
+	testing.expect_value(t, screen_code(m, 15, 31), 0xCF)
+	h := snake_word(m, head_var)
+	testing.expect_value(t, mem_read8(m, u16(h)), 0x9F) // yellow head, green body
+	testing.expect_value(t, mem_read8(m, u16(h - 1)), 0x8F)
+	testing.expect_value(t, mem_read8(m, u16(h - 2)), 0x8F)
+	testing.expect_value(t, snake_word(m, len_var), 3)
+	food := snake_word(m, food_var)
+	testing.expect(t, food >= 0x0400 + 2 * 32 && food < 0x0400 + 15 * 32, "food is on the field")
+	testing.expect_value(t, mem_read8(m, u16(food)), 0xBF)
+
+	h1 := snake_wait_move(m, head_var)
+	testing.expect_value(t, h1, h + 1) // heading right
+	// a reversal is ignored
+	tap_key(m, .LEFT)
+	h2 := snake_wait_move(m, head_var)
+	testing.expect(t, h2 > h1 && h2 / 32 == h1 / 32, "still heading right")
+	// turn up
+	tap_key(m, .UP)
+	a := snake_wait_move(m, head_var)
+	b := snake_wait_move(m, head_var)
+	testing.expect_value(t, b, a - 32)
+
+	// feed it: an apple straight ahead
+	ahead := b - 32
+	mem_write8(m, u16(ahead), 0xBF)
+	mem_write8(m, u16(food_var), u8(ahead >> 8))
+	mem_write8(m, u16(food_var + 1), u8(ahead))
+	c := snake_wait_move(m, head_var)
+	testing.expect_value(t, c, ahead)
+	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 001")
+	testing.expect_value(t, snake_word(m, len_var), 4)
+
+	// carry on into the wall: game over
+	settle(m, 400)
+	expect_screen_contains(t, m, "GAME OVER")
+	tap_key(m, .SPACE)
+	settle(m, 2)
+	testing.expect_value(t, screen_row(m, 0), "SNAKE  SCORE 000") // a new game
+
+	// BREAK ends the program and the monitor is back
+	tap_key(m, .ESCAPE)
+	settle(m, 10)
+	expect_row(t, m, ">")
+}

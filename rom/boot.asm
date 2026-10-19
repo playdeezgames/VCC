@@ -32,6 +32,7 @@ api_tape_load	jmp tape_load		; $8030
 api_rand		jmp rand		; $8033
 api_rand_seed	jmp rand_seed		; $8036
 api_rand_range	jmp rand_range		; $8039
+api_locate	jmp locate		; $803C
 
 	setdp 0
 
